@@ -1,3 +1,4 @@
+// script.js
 class DataService {
     constructor(baseUrl) {
         this.baseUrl = baseUrl;
@@ -5,16 +6,19 @@ class DataService {
         this.cacheDuration = 5 * 60 * 1000; // 5分钟缓存
     }
 
-    async getData(site) {
+    async getData(requestData) {
         try {
-            // 构建缓存键
-            const cacheKey = `data_${site}`;
-            
+            const site = requestData.site;
+            if (!site) {
+                throw new Error('Site parameter is required');
+            }
+
             // 检查缓存
+            const cacheKey = `data_${site}`;
             if (this.cache.has(cacheKey)) {
                 const { timestamp, value } = this.cache.get(cacheKey);
                 if (Date.now() - timestamp < this.cacheDuration) {
-                    return value;
+                    return this.formatResponse(value);
                 }
             }
 
@@ -35,47 +39,94 @@ class DataService {
                 value: data
             });
 
-            return data;
+            return this.formatResponse(data);
         } catch (error) {
-            console.error(`Failed to fetch data for site ${site}:`, error);
-            throw error;
+            console.error('Error:', error);
+            return this.formatErrorResponse(error);
         }
+    }
+
+    // 格式化成功响应，匹配Lambda的响应格式
+    formatResponse(data) {
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST',
+                'Access-Control-Allow-Headers': 'Content-Type'
+            },
+            body: JSON.stringify(data)
+        };
+    }
+
+    // 格式化错误响应，匹配Lambda的错误响应格式
+    formatErrorResponse(error) {
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                error: 'Failed to retrieve data',
+                message: error.message
+            })
+        };
     }
 }
 
-// 初始化服务
-const baseUrl = 'https://your-username.github.io/my-json-data';
-const dataService = new DataService(baseUrl);
-
-// 获取URL参数中的site值
-function getSiteParameter() {
-    const urlParams = new URLSearchParams(window.location.search);
-    return urlParams.get('site');
-}
-
-// 显示数据
-async function displayData() {
+// 创建处理函数
+async function handleRequest(event) {
+    const dataService = new DataService('https://guitarv.github.io/Auto-Blast-Radius');
+    
     try {
-        const site = getSiteParameter();
-        if (!site) {
-            throw new Error('Site parameter is required');
-        }
+        // 解析请求体
+        const requestData = typeof event.body === 'string' 
+            ? JSON.parse(event.body) 
+            : event.body;
 
-        const data = await dataService.getData(site);
-        const container = document.getElementById('data-container');
-        
-        // 格式化显示
-        container.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+        // 获取数据
+        return await dataService.getData(requestData);
     } catch (error) {
-        const container = document.getElementById('data-container');
-        container.innerHTML = `
-            <div style="color: red; padding: 20px; border: 1px solid red; border-radius: 4px;">
-                <h3>Error</h3>
-                <p>${error.message}</p>
-            </div>
-        `;
+        return {
+            statusCode: 400,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                error: 'Invalid request',
+                message: error.message
+            })
+        };
     }
 }
 
-// 页面加载时执行
-window.onload = displayData;
+// 处理OPTIONS请求（用于CORS预检）
+function handleOptions() {
+    return {
+        statusCode: 200,
+        headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST',
+            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Max-Age': '3600'
+        },
+        body: ''
+    };
+}
+
+// 主处理函数
+async function main(event) {
+    // 处理CORS预检请求
+    if (event.httpMethod === 'OPTIONS') {
+        return handleOptions();
+    }
+
+    // 处理实际请求
+    return await handleRequest(event);
+}
+
+// 导出处理函数
+exports.handler = main;
