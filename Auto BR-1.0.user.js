@@ -2,6 +2,7 @@
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
 // @version      1.1
+// @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
 // @grant        GM_addStyle
