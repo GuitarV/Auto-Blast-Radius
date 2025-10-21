@@ -11,21 +11,57 @@
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0-rc.0/js/select2.min.js
 // @resource     SELECT2_CSS https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0-rc.0/css/select2.min.css
+// @connect      twuukpz75g.execute-api.us-west-2.amazonaws.com
+// @connect      cloudforge-build.amazon.com
+// @connect      aha.bjs.aws-border.cn
+// @connect      cdnjs.cloudflare.com
+// @connect      cdn.jsdelivr.net
+// @connect      code.jquery.com
+// @connect      ajax.googleapis.com
 // @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
 // @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
+
 // ==/UserScript==
 
 (function() {
     'use strict';
 
     const loadExternalResources = async () => {
+        // 先加载 jQuery
+        if (typeof jQuery === 'undefined') {
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js';
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        }
+
+        // 然后加载 select2 JS
+        if (typeof jQuery.fn.select2 === 'undefined') {
+            await new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0-rc.0/js/select2.min.js';
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        }
+
+        // 最后加载 select2 CSS
         if (!document.querySelector('link[href*="select2"]')) {
-            const style = document.createElement('link');
-            style.rel = 'stylesheet';
-            style.href = 'https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css';
-            document.head.appendChild(style);
+            await new Promise((resolve, reject) => {
+                const style = document.createElement('link');
+                style.rel = 'stylesheet';
+                style.href = 'https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0-rc.0/css/select2.min.css';
+                style.onload = resolve;
+                style.onerror = reject;
+                document.head.appendChild(style);
+            });
         }
     };
+
 
     let EXCEL_DATA = [];
     let positionMap = new Map();
