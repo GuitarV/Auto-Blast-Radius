@@ -447,9 +447,7 @@
     function makeRequest(url, method, retryCount = 0) {
         const maxRetries = 3;
         const retryDelay = 200;
-
         console.log(`Making request to ${url} (attempt ${retryCount + 1}/${maxRetries + 1})`);
-
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: method,
@@ -459,14 +457,16 @@
                     "Accept": "application/json",
                     "X-Requested-With": "XMLHttpRequest",
                 },
-                timeout: 10000,
+                timeout: 30000,
                 withCredentials: true,
                 onload: function(response) {
                     console.log(`Response from ${url}:`, {
                         status: response.status,
                         statusText: response.statusText,
                         finalUrl: response.finalUrl,
-                        responseText: response.responseText.substring(0, 200) + '...'
+                        responseText: response.responseText ?
+                            (response.responseText.substring(0, 200) + '...') :
+                            'No response text'
                     });
 
                     if (response.status === 200) {
@@ -623,16 +623,16 @@
         'EBS': 'EBS',
 
         // Production 类型
-        'Production': 'Prod',
-        'AWS Prod': 'Prod',
-        'AWS-Prod': 'Prod',
-        'Bering Rack': 'Prod',
-        'Bering Tape Rack': 'Prod',
-        'SERVER': 'Prod',
-        'Classic-Prod': 'Prod',
-        'Classic Prod': 'Prod',
-        'GPS': 'Prod',
-        'AWS': 'Prod',
+        'Production': 'Production',
+        'AWS Prod': 'Production',
+        'AWS-Prod': 'Production',
+        'Bering Rack': 'Production',
+        'Bering Tape Rack': 'Production',
+        'SERVER': 'Production',
+        'Classic-Prod': 'Production',
+        'Classic Prod': 'Production',
+        'GPS': 'Production',
+        'AWS': 'Production',
 
         // Patch 类型
         'PATCH': 'Patch',
@@ -655,6 +655,8 @@
             euclid: `https://aha.bjs.aws-border.cn/blast-radius/api/get-euclid-bricks-for-site/${site}`
         };
 
+        console.log('Fetching from URLs:', urls);
+
         const maxRetries = 3;
         const retryDelay = 500;
 
@@ -674,11 +676,19 @@
 
         try {
             // 使用 Promise.allSettled 并行处理所有请求
+            console.log('Starting parallel requests...');
             const [positionResult, networkResult, euclidResult] = await Promise.allSettled([
                 makeRequest(urls.position, 'GET'),
                 makeRequest(urls.network, 'GET'),
                 makeRequest(urls.euclid, 'GET')
             ]);
+
+            console.log('All requests completed. Results:', {
+                position: positionResult.status,
+                network: networkResult.status,
+                euclid: euclidResult.status
+            });
+
 
             // 检查核心数据是否成功
             if (positionResult.status === 'rejected') {
@@ -689,6 +699,7 @@
             }
 
             // 处理位置数据
+            console.log('Processing position data...');
             let positionData;
             try {
                 positionData = JSON.parse(positionResult.value.responseText);
@@ -702,6 +713,7 @@
             }
 
             // 处理网络数据
+            console.log('Processing network data...');
             let networkData;
             try {
                 networkData = JSON.parse(networkResult.value.responseText);
@@ -711,6 +723,7 @@
             }
 
             // 处理Euclid数据
+            console.log('Processing Euclid data...');
             let hasEuclidAccess = false;
             let euclidData = {};
             if (euclidResult.status === 'fulfilled') {
@@ -723,10 +736,12 @@
             }
 
             // 创建网络数据映射
+            console.log('Creating data mappings...');
             const networkDataMap = new Map();
             const euclidRacksMap = new Map();
 
             // 处理网络数据
+            console.log('Processing network data mapping...');
             if (networkData && typeof networkData === 'object') {
                 Object.entries(networkData).forEach(([_, item]) => {
                     if (item.position_id) {
@@ -738,6 +753,7 @@
             }
 
             // 处理Euclid数据
+            console.log('Processing Euclid racks mapping...');
             if (hasEuclidAccess && euclidData && typeof euclidData === 'object') {
                 Object.entries(euclidData).forEach(([assetId, brick]) => {
                     if (brick.rackAssetId) {
@@ -751,6 +767,7 @@
             }
 
             // 创建最终的位置映射
+            console.log('Creating final position map...');
             const newPositionMap = new Map();
 
             // 处理位置数据时整合所有信息
@@ -796,6 +813,7 @@
                 });
             }
 
+            console.log('Position map creation completed');
             return newPositionMap;
 
         } catch (error) {
@@ -2098,9 +2116,9 @@ function setupModalEvents() {
                                 <span class="position-name">${position.position}</span>
                             </div>
                         `;
-                        })
-                            .join('');
-                    }
+                    })
+                        .join('');
+                }
 
                 modal.style.display = 'block';
                 backdrop.style.display = 'block';
