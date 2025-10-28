@@ -19,6 +19,11 @@
 // @connect      code.jquery.com
 // @connect      ajax.googleapis.com
 // @connect      midway-auth.aws-border.cn
+// @connect      sentry.amazon.com
+// @connect      sso.amazon.com
+// @connect      idp.amazon.com
+// @connect      *.aws-border.cn
+// @connect      *.amazon.com
 // @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
 // @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
 
@@ -439,27 +444,103 @@
 
 
     // 辅助函数：发送请求
-    function makeRequest(url, method) {
+    function makeRequest(url, method, retryCount = 0) {
+        const maxRetries = 3;
+        const retryDelay = 200;
+
+        console.log(`Making request to ${url} (attempt ${retryCount + 1}/${maxRetries + 1})`);
+
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: method,
                 url: url,
                 headers: {
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-Requested-With": "XMLHttpRequest",
                 },
                 timeout: 10000,
+                withCredentials: true,
                 onload: function(response) {
-                    if (response.status >= 200 && response.status < 300) {
+                    console.log(`Response from ${url}:`, {
+                        status: response.status,
+                        statusText: response.statusText,
+                        finalUrl: response.finalUrl,
+                        responseText: response.responseText.substring(0, 200) + '...'
+                    });
+
+                    if (response.status === 200) {
                         resolve(response);
+                    } else if (response.status === 401 || response.status === 403 ||
+                               response.responseText.includes('login') ||
+                               response.finalUrl?.includes('midway-auth') ||
+                               response.finalUrl?.includes('sentry.amazon.com')) {
+
+                        console.log('Authentication required for:', url);
+
+                        // 根据 URL 决定打开哪个登录页面
+                        let loginUrl = 'https://cloudforge-build.amazon.com/';
+                        if (url.includes('aha.bjs.aws-border.cn')) {
+                            loginUrl = 'https://midway-auth.aws-border.cn/login';
+                        }
+
+                        console.log('Opening login page:', loginUrl);
+                        window.open(loginUrl, '_blank');
+
+                        // 如果还有重试次数，等待后重试
+                        if (retryCount < maxRetries) {
+                            console.log(`Will retry ${url} in ${retryDelay * (retryCount + 1)}ms`);
+                            setTimeout(() => {
+                                makeRequest(url, method, retryCount + 1)
+                                    .then(resolve)
+                                    .catch(reject);
+                            }, retryDelay * (retryCount + 1));
+                        } else {
+                            console.error('Max retries reached for authentication');
+                            reject(new Error('Authentication required. Please login and try again.'));
+                        }
                     } else {
-                        reject(new Error(`Request failed with status ${response.status}: ${response.statusText}`));
+                        // 如果是其他错误且还有重试次数
+                        if (retryCount < maxRetries) {
+                            console.log(`Request failed, will retry ${url} in ${retryDelay * (retryCount + 1)}ms`);
+                            setTimeout(() => {
+                                makeRequest(url, method, retryCount + 1)
+                                    .then(resolve)
+                                    .catch(reject);
+                            }, retryDelay * (retryCount + 1));
+                        } else {
+                            console.error('Max retries reached for request');
+                            reject(new Error(`Request failed with status ${response.status}`));
+                        }
                     }
                 },
                 onerror: function(error) {
-                    reject(new Error(`Network request failed: ${error.message || 'Unknown error'}`));
+                    console.error(`Error for ${url}:`, error);
+                    if (retryCount < maxRetries) {
+                        console.log(`Network error, will retry ${url} in ${retryDelay * (retryCount + 1)}ms`);
+                        setTimeout(() => {
+                            makeRequest(url, method, retryCount + 1)
+                                .then(resolve)
+                                .catch(reject);
+                        }, retryDelay * (retryCount + 1));
+                    } else {
+                        console.error('Max retries reached after network error');
+                        reject(error);
+                    }
                 },
                 ontimeout: function() {
-                    reject(new Error('Request timed out'));
+                    console.error(`Timeout for ${url}`);
+                    if (retryCount < maxRetries) {
+                        console.log(`Request timed out, will retry ${url} in ${retryDelay * (retryCount + 1)}ms`);
+                        setTimeout(() => {
+                            makeRequest(url, method, retryCount + 1)
+                                .then(resolve)
+                                .catch(reject);
+                        }, retryDelay * (retryCount + 1));
+                    } else {
+                        console.error('Max retries reached after timeout');
+                        reject(new Error('Request timed out'));
+                    }
                 }
             });
         });
@@ -1920,18 +2001,18 @@ function setupModalEvents() {
                             ${isEuclid ? `
                                 <span class="euclid-indicator">
                                     ${deployedAssetId ?
-                                `<a href="https://aha.bjs.aws-border.cn/host-monitoring/euclid/${deployedAssetId}"
+                            `<a href="https://aha.bjs.aws-border.cn/host-monitoring/euclid/${deployedAssetId}"
                                             target="_blank"
                                             class="euclid-link">Euclid</a>` :
-                            'Euclid'
-                        }
+                        'Euclid'
+                    }
                                 </span>
                             ` : ''}
                         </div>
                     `;
-                        })
-                            .filter(html => html)
-                            .join('');
+                    })
+                        .filter(html => html)
+                        .join('');
 
                     // 添加复制按钮的事件监听器
                     const copyBtn = modal.querySelector('#copyPositionsBtn');
@@ -1972,47 +2053,47 @@ function setupModalEvents() {
                     </div>
                 `;
 
-                        modal.querySelector('.position-list').innerHTML = positions
-                            .sort((a, b) => {
-                            const aCompare = `${a.room} ${a.position}`;
-                            const bCompare = `${b.room} ${b.position}`;
-                            return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
-                        })
-                            .map(position => `
+                    modal.querySelector('.position-list').innerHTML = positions
+                        .sort((a, b) => {
+                        const aCompare = `${a.room} ${a.position}`;
+                        const bCompare = `${b.room} ${b.position}`;
+                        return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
+                    })
+                        .map(position => `
                         <div class="position-item">
                             <span class="position-name">${position.room} ${position.position}</span>
                         </div>
                     `).join('');
 
-                        // 添加复制按钮的事件监听器
-                        const copyBtn = modal.querySelector('#copyPositionsBtn');
-                        if (copyBtn) {
-                            copyBtn.replaceWith(copyBtn.cloneNode(true));
-                            const newCopyBtn = modal.querySelector('#copyPositionsBtn');
-                            newCopyBtn.addEventListener('click', () => {
-                                copyToClipboard(positionsText, newCopyBtn);
-                            });
-                        }
+                    // 添加复制按钮的事件监听器
+                    const copyBtn = modal.querySelector('#copyPositionsBtn');
+                    if (copyBtn) {
+                        copyBtn.replaceWith(copyBtn.cloneNode(true));
+                        const newCopyBtn = modal.querySelector('#copyPositionsBtn');
+                        newCopyBtn.addEventListener('click', () => {
+                            copyToClipboard(positionsText, newCopyBtn);
+                        });
+                    }
 
-                        modal.style.display = 'block';
-                        backdrop.style.display = 'block';
-                        setupCloseButton();
-                    } else {
-                        // 下游机柜单元格处理逻辑
-                        const positions = JSON.parse(cell.dataset.positions || '[]');
+                    modal.style.display = 'block';
+                    backdrop.style.display = 'block';
+                    setupCloseButton();
+                } else {
+                    // 下游机柜单元格处理逻辑
+                    const positions = JSON.parse(cell.dataset.positions || '[]');
 
-                        if (!positions.length) {
-                            console.log('No downstream positions found');
-                            return;
-                        }
+                    if (!positions.length) {
+                        console.log('No downstream positions found');
+                        return;
+                    }
 
-                        modal.querySelector('.modal-title').textContent =
-                            `Network-connected racks (${positions.length} positions)`;
+                    modal.querySelector('.modal-title').textContent =
+                        `Network-connected racks (${positions.length} positions)`;
 
-                        modal.querySelector('.position-list').innerHTML = positions
-                            .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
-                            .map(position => {
-                            return `
+                    modal.querySelector('.position-list').innerHTML = positions
+                        .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
+                        .map(position => {
+                        return `
                             <div class="position-item">
                                 <span class="position-name">${position.position}</span>
                             </div>
