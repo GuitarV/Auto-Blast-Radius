@@ -18,6 +18,7 @@
 // @connect      cdn.jsdelivr.net
 // @connect      code.jquery.com
 // @connect      ajax.googleapis.com
+// @connect      midway-auth.aws-border.cn
 // @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
 // @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
 
@@ -181,6 +182,39 @@
             }
         });
 
+        // AHA 登录检查函数
+        function checkAHALogin() {
+            return new Promise((resolve) => {
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url: 'https://aha.bjs.aws-border.cn/health',
+                    headers: {
+                        "Accept": "application/json",
+                    },
+                    timeout: 10000,
+                    withCredentials: true,
+                    onload: function(response) {
+                        // 如果需要登录
+                        if (response.finalUrl && response.finalUrl.includes('midway-auth.aws-border.cn')) {
+                            console.log('AHA login required');
+                            // 打开登录页面，但不等待
+                            window.open('https://midway-auth.aws-border.cn/login', '_blank');
+                        }
+                        resolve();
+                    },
+                    onerror: function(error) {
+                        console.warn('AHA login check failed:', error);
+                        resolve();
+                    },
+                    ontimeout: function() {
+                        console.warn('AHA login check timeout');
+                        resolve();
+                    }
+                });
+            });
+        }
+
+
         // 选项点击处理
         optionsList.addEventListener('click', async (event) => {
             if (event.target.tagName === 'LI') {
@@ -205,6 +239,10 @@
                         progressText.textContent = `${percentage}%`;
                         progressStep.textContent = step;
                     };
+
+                    // 检查 AHA 登录状态
+                    updateProgress(5, 'Checking AHA login status...');
+                    await checkAHALogin();
 
                     // 加载主数据
                     updateProgress(10, 'Loading site topology data😀...');
@@ -409,8 +447,20 @@
                 headers: {
                     "Content-Type": "application/json"
                 },
-                onload: resolve,
-                onerror: reject
+                timeout: 10000,
+                onload: function(response) {
+                    if (response.status >= 200 && response.status < 300) {
+                        resolve(response);
+                    } else {
+                        reject(new Error(`Request failed with status ${response.status}: ${response.statusText}`));
+                    }
+                },
+                onerror: function(error) {
+                    reject(new Error(`Network request failed: ${error.message || 'Unknown error'}`));
+                },
+                ontimeout: function() {
+                    reject(new Error('Request timed out'));
+                }
             });
         });
     }
@@ -523,6 +573,23 @@
             network: `https://cloudforge-build.amazon.com/datacenters/${site}/floorplans/network_connectivity.json`,
             euclid: `https://aha.bjs.aws-border.cn/blast-radius/api/get-euclid-bricks-for-site/${site}`
         };
+
+        const maxRetries = 3;
+        const retryDelay = 500;
+
+        async function fetchWithRetry(url, method, retryCount = 0) {
+            try {
+                const response = await makeRequest(url, method);
+                return response;
+            } catch (error) {
+                if (retryCount < maxRetries) {
+                    console.log(`Retry ${retryCount + 1} for ${url}`);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay * (retryCount + 1)));
+                    return fetchWithRetry(url, method, retryCount + 1);
+                }
+                throw error;
+            }
+        }
 
         try {
             // 使用 Promise.allSettled 并行处理所有请求
@@ -652,7 +719,7 @@
 
         } catch (error) {
             console.error('Error in fetchPositionInfo:', error);
-            throw error;
+            throw new Error(`Failed to fetch data for site ${site}: ${error.message}`);
         }
     }
 
@@ -1459,38 +1526,57 @@
         }
     }
 
-    // 添加导出功能的实现
-    function generateStatsMarkdown(positions, activeRackTypes, stats) {
-        let markdown = `| Power Status | ${activeRackTypes.join(' | ')} | Total |\n`;
-        markdown += `|${'-'.repeat(13)}|${activeRackTypes.map(() => '-'.repeat(10)).join('|')}|${'-'.repeat(10)}|\n`;
+// 添加导出功能的实现
+function generateStatsMarkdown(positions, activeRackTypes, stats) {
+    let markdown = `| Power Status | ${activeRackTypes.join(' | ')} | Total |\n`;
+    markdown += `|${'-'.repeat(13)}|${activeRackTypes.map(() => '-'.repeat(10)).join('|')}|${'-'.repeat(10)}|\n`;
 
-        ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss'].forEach(metric => {
-            const rowValues = activeRackTypes.map(type => {
-                const value = stats.detailedStats[type][metric] || 0;
-                const euclidCount = stats.detailedStats[type].euclidCount?.[metric] || 0;
-                return euclidCount > 0 ? `${value} (${euclidCount})` : value;
-            });
-            const rowTotal = activeRackTypes.reduce((sum, type) =>
-                                                    sum + (stats.detailedStats[type][metric] || 0), 0);
-            markdown += `| ${metric} | ${rowValues.join(' | ')} | ${rowTotal} |\n`;
+    ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss'].forEach(metric => {
+        const rowValues = activeRackTypes.map(type => {
+            const value = stats.detailedStats[type][metric] || 0;
+            const euclidCount = stats.detailedStats[type].euclidCount?.[metric] || 0;
+            return euclidCount > 0 ? `${value} (${euclidCount})` : value;
         });
+        const rowTotal = activeRackTypes.reduce((sum, type) =>
+                                                sum + (stats.detailedStats[type][metric] || 0), 0);
+        markdown += `| ${metric} | ${rowValues.join(' | ')} | ${rowTotal} |\n`;
+    });
 
-        const totals = activeRackTypes.map(type =>
-                                           ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss']
-                                           .reduce((sum, metric) => sum + (stats.detailedStats[type][metric] || 0), 0)
-                                          );
-        const finalTotal = totals.reduce((sum, val) => sum + val, 0);
-        markdown += `| **Total** | ${totals.join(' | ')} | ${finalTotal} |\n`;
+    const totals = activeRackTypes.map(type =>
+                                       ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss']
+                                       .reduce((sum, metric) => sum + (stats.detailedStats[type][metric] || 0), 0)
+                                      );
+    const finalTotal = totals.reduce((sum, val) => sum + val, 0);
+    markdown += `| **Total** | ${totals.join(' | ')} | ${finalTotal} |\n`;
 
-        return markdown;
-    }
+    return markdown;
+}
 
 
-    // 添加复制到剪贴板的功能
-    async function copyToClipboard(text, button = null) {
+// 添加复制到剪贴板的功能
+async function copyToClipboard(text, button = null) {
+    try {
+        await navigator.clipboard.writeText(text);
+        // 如果提供了按钮元素，显示视觉反馈
+        if (button) {
+            const originalText = button.innerHTML;
+            button.innerHTML = '<span class="export-icon">✓</span> Copied!';
+            button.classList.add('copied');
+
+            setTimeout(() => {
+                button.innerHTML = '<span class="export-icon">📋</span> Copy';
+                button.classList.remove('copied');
+            }, 3000);
+        }
+    } catch (err) {
+        console.error('Failed to copy text:', err);
+        // 回退方法
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
         try {
-            await navigator.clipboard.writeText(text);
-            // 如果提供了按钮元素，显示视觉反馈
+            document.execCommand('copy');
             if (button) {
                 const originalText = button.innerHTML;
                 button.innerHTML = '<span class="export-icon">✓</span> Copied!';
@@ -1502,255 +1588,236 @@
                 }, 3000);
             }
         } catch (err) {
-            console.error('Failed to copy text:', err);
-            // 回退方法
-            const textarea = document.createElement('textarea');
-            textarea.value = text;
-            document.body.appendChild(textarea);
-            textarea.select();
-            try {
-                document.execCommand('copy');
-                if (button) {
-                    const originalText = button.innerHTML;
-                    button.innerHTML = '<span class="export-icon">✓</span> Copied!';
-                    button.classList.add('copied');
+            console.error('Fallback copy failed:', err);
+            alert('Failed to copy to clipboard');
+        }
+        document.body.removeChild(textarea);
+    }
+}
 
-                    setTimeout(() => {
-                        button.innerHTML = '<span class="export-icon">📋</span> Copy';
-                        button.classList.remove('copied');
-                    }, 3000);
-                }
-            } catch (err) {
-                console.error('Fallback copy failed:', err);
-                alert('Failed to copy to clipboard');
+// 初始化函数
+async function init() {
+    const maxRetries = 3;
+    let retryCount = 0;
+
+    while (retryCount < maxRetries) {
+        try {
+            await loadExternalResources();
+
+            // 验证依赖项是否正确加载
+            if (!window.jQuery || !window.jQuery.fn.select2) {
+                throw new Error('Required dependencies not loaded');
             }
-            document.body.removeChild(textarea);
-        }
-    }
 
-    // 初始化函数
-    async function init() {
-        const maxRetries = 3;
-        let retryCount = 0;
+            const container = setupInterface();
+            document.getElementById('xwikicontent').appendChild(container);
 
-        while (retryCount < maxRetries) {
-            try {
-                await loadExternalResources();
-
-                // 验证依赖项是否正确加载
-                if (!window.jQuery || !window.jQuery.fn.select2) {
-                    throw new Error('Required dependencies not loaded');
-                }
-
-                const container = setupInterface();
-                document.getElementById('xwikicontent').appendChild(container);
-
-                const loadingIndicator = container.querySelector('.loading-indicator');
-                if (loadingIndicator) {
-                    loadingIndicator.style.display = 'none';
-                }
-
-                break; // 成功后退出循环
-            } catch (error) {
-                retryCount++;
-                console.warn(`Initialization attempt ${retryCount} failed:`, error);
-
-                if (retryCount === maxRetries) {
-                    console.error('Failed to initialize after multiple attempts:', error);
-                    const errorDiv = document.createElement('div');
-                    errorDiv.className = 'error-message';
-                    errorDiv.textContent = `Failed to initialize after ${maxRetries} attempts: ${error.message}`;
-                    document.getElementById('xwikicontent').appendChild(errorDiv);
-                } else {
-                    // 等待一段时间后重试
-                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                }
+            const loadingIndicator = container.querySelector('.loading-indicator');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
             }
-        }
-    }
 
+            break; // 成功后退出循环
+        } catch (error) {
+            retryCount++;
+            console.warn(`Initialization attempt ${retryCount} failed:`, error);
 
-    // 获取 Position Site 函数
-    function getPositionSite(data) {
-        if (!Array.isArray(data) || data.length === 0) {
-            throw new Error('Invalid data: Empty or not an array');
-        }
-
-        const positionSite = data[0]['Position Site'];
-        if (!positionSite) {
-            throw new Error('Position Site not found in data');
-        }
-
-        return positionSite;
-    }
-
-    // 初始化筛选器
-    function initializeFilters(filtersContainer, stats) {
-        if (typeof jQuery === 'undefined') {
-            throw new Error('jQuery is not loaded');
-        }
-        if (typeof jQuery.fn.select2 === 'undefined') {
-            throw new Error('Select2 is not loaded');
-        }
-
-        filtersContainer.innerHTML = '';
-
-        const filters = getFilterOptions();
-        filters.forEach(filter => {
-            const filterSection = document.createElement('div');
-            filterSection.className = 'filter-section';
-
-            const label = document.createElement('label');
-            label.textContent = filter.label;
-
-            const select = $('<select>', {
-                class: 'filter-select',
-                multiple: true,
-                'data-column': filter.column,
-                'data-is-position': filter.isPosition
-            });
-
-            // 根据不同的列类型添加选项
-            if (filter.column === 'Position Room') {
-                // 从 positionMap 获取所有房间
-                const rooms = [...new Set(
-                    Array.from(positionMap.values()).map(info => info.room_name)
-                )].filter(Boolean);
-                rooms.sort().forEach(room => {
-                    select.append(new Option(room, room));
-                });
-            } else if (filter.column === 'Position') {
-                // 从 positionMap 获取所有位置
-                const positions = [...new Set(
-                    Array.from(positionMap.values()).map(info => info.name)
-                )].filter(Boolean);
-                positions.sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
-                    .forEach(position => {
-                    select.append(new Option(position, position));
-                });
-            } else if (filter.column === 'type' && stats) {
-                const activeRackTypes = Object.keys(stats.detailedStats)
-                .filter(type => {
-                    return stats.detailedStats[type]['Total'] > 0 ||
-                        (type === 'PATCH' && stats.patchRacks && stats.patchRacks.total > 0);
-                })
-                .sort();
-                select.empty();
-                if (activeRackTypes.length > 0) {
-                    activeRackTypes.forEach(type => {
-                        const option = new Option(type, type);
-                        select.append(option);
-                    });
-                } else {
-                    select.append(new Option('No Types Available', ''));
-                }
-            } else if (filter.column === 'status') {
-                ['deployed', 'undeployed', 'disabled'].forEach(status => {
-                    select.append(new Option(
-                        status.charAt(0).toUpperCase() + status.slice(1),
-                        status
-                    ));
-                });
+            if (retryCount === maxRetries) {
+                console.error('Failed to initialize after multiple attempts:', error);
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error-message';
+                errorDiv.textContent = `Failed to initialize after ${maxRetries} attempts: ${error.message}`;
+                document.getElementById('xwikicontent').appendChild(errorDiv);
             } else {
-                // 只为有电力数据的位置添加电力相关的选项
-                const options = [...new Set(EXCEL_DATA
-                                            .map(item => {
-                    if (filter.column.startsWith('routingInfo.')) {
-                        const field = filter.column.split('.')[1];
-                        return item.routingInfo?.[field];
-                    }
-                    return item[filter.column];
-                })
-                                            .filter(Boolean)
-                                           )].sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
-
-                options.forEach(option => {
-                    select.append(new Option(option, option));
-                });
+                // 等待一段时间后重试
+                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
             }
+        }
+    }
+}
 
-            filterSection.appendChild(label);
-            $(filterSection).append(select);
 
-            // Select2 初始化
-            select.select2({
-                placeholder: `Select ${filter.label}`,
-                allowClear: true,
-                closeOnSelect: false,
-                width: '100%',
-                selectOnClose: false,
-                minimumResultsForSearch: 10,
-                dropdownAutoWidth: true,
-                dropdownParent: filterSection,
-                templateSelection: function(data, container) {
-                    const selected = select.val();
-                    if (selected && selected.length > 1) {
-                        if ($(container).is(':first-child')) {
-                            return `${selected.length} items selected`;
-                        }
-                        return '';
-                    }
-                    return data.text;
-                }
-            });
+// 获取 Position Site 函数
+function getPositionSite(data) {
+    if (!Array.isArray(data) || data.length === 0) {
+        throw new Error('Invalid data: Empty or not an array');
+    }
 
-            filtersContainer.appendChild(filterSection);
+    const positionSite = data[0]['Position Site'];
+    if (!positionSite) {
+        throw new Error('Position Site not found in data');
+    }
+
+    return positionSite;
+}
+
+// 初始化筛选器
+function initializeFilters(filtersContainer, stats) {
+    if (typeof jQuery === 'undefined') {
+        throw new Error('jQuery is not loaded');
+    }
+    if (typeof jQuery.fn.select2 === 'undefined') {
+        throw new Error('Select2 is not loaded');
+    }
+
+    filtersContainer.innerHTML = '';
+
+    const filters = getFilterOptions();
+    filters.forEach(filter => {
+        const filterSection = document.createElement('div');
+        filterSection.className = 'filter-section';
+
+        const label = document.createElement('label');
+        label.textContent = filter.label;
+
+        const select = $('<select>', {
+            class: 'filter-select',
+            multiple: true,
+            'data-column': filter.column,
+            'data-is-position': filter.isPosition
         });
 
-        // 修改筛选逻辑
-        const activeFilters = {};
-        function debounce(fn, delay) {
-            let timer;
-            return function(...args) {
-                clearTimeout(timer);
-                timer = setTimeout(() => fn.apply(this, args), delay);
-            }
-        }
-        // 创建防抖版本的updateDisplay
-        const debouncedUpdateDisplay = debounce((filters) => {
-            updateDisplay(filters);
-        }, 300);
-
-        // 修改事件处理
-        $('.filter-select').on('change', function() {
-            const column = $(this).data('column');
-            const values = $(this).val() || [];
-
-            if (values.length > 0) {
-                activeFilters[column] = values.map(value => String(value).trim());
+        // 根据不同的列类型添加选项
+        if (filter.column === 'Position Room') {
+            // 从 positionMap 获取所有房间
+            const rooms = [...new Set(
+                Array.from(positionMap.values()).map(info => info.room_name)
+            )].filter(Boolean);
+            rooms.sort().forEach(room => {
+                select.append(new Option(room, room));
+            });
+        } else if (filter.column === 'Position') {
+            // 从 positionMap 获取所有位置
+            const positions = [...new Set(
+                Array.from(positionMap.values()).map(info => info.name)
+            )].filter(Boolean);
+            positions.sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
+                .forEach(position => {
+                select.append(new Option(position, position));
+            });
+        } else if (filter.column === 'type' && stats) {
+            const activeRackTypes = Object.keys(stats.detailedStats)
+            .filter(type => {
+                return stats.detailedStats[type]['Total'] > 0 ||
+                    (type === 'PATCH' && stats.patchRacks && stats.patchRacks.total > 0);
+            })
+            .sort();
+            select.empty();
+            if (activeRackTypes.length > 0) {
+                activeRackTypes.forEach(type => {
+                    const option = new Option(type, type);
+                    select.append(option);
+                });
             } else {
-                delete activeFilters[column];
+                select.append(new Option('No Types Available', ''));
             }
+        } else if (filter.column === 'status') {
+            ['deployed', 'undeployed', 'disabled'].forEach(status => {
+                select.append(new Option(
+                    status.charAt(0).toUpperCase() + status.slice(1),
+                    status
+                ));
+            });
+        } else {
+            // 只为有电力数据的位置添加电力相关的选项
+            const options = [...new Set(EXCEL_DATA
+                                        .map(item => {
+                if (filter.column.startsWith('routingInfo.')) {
+                    const field = filter.column.split('.')[1];
+                    return item.routingInfo?.[field];
+                }
+                return item[filter.column];
+            })
+                                        .filter(Boolean)
+                                       )].sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
 
-            debouncedUpdateDisplay(activeFilters);
+            options.forEach(option => {
+                select.append(new Option(option, option));
+            });
+        }
+
+        filterSection.appendChild(label);
+        $(filterSection).append(select);
+
+        // Select2 初始化
+        select.select2({
+            placeholder: `Select ${filter.label}`,
+            allowClear: true,
+            closeOnSelect: false,
+            width: '100%',
+            selectOnClose: false,
+            minimumResultsForSearch: 10,
+            dropdownAutoWidth: true,
+            dropdownParent: filterSection,
+            templateSelection: function(data, container) {
+                const selected = select.val();
+                if (selected && selected.length > 1) {
+                    if ($(container).is(':first-child')) {
+                        return `${selected.length} items selected`;
+                    }
+                    return '';
+                }
+                return data.text;
+            }
         });
-        return activeFilters;
+
+        filtersContainer.appendChild(filterSection);
+    });
+
+    // 修改筛选逻辑
+    const activeFilters = {};
+    function debounce(fn, delay) {
+        let timer;
+        return function(...args) {
+            clearTimeout(timer);
+            timer = setTimeout(() => fn.apply(this, args), delay);
+        }
+    }
+    // 创建防抖版本的updateDisplay
+    const debouncedUpdateDisplay = debounce((filters) => {
+        updateDisplay(filters);
+    }, 300);
+
+    // 修改事件处理
+    $('.filter-select').on('change', function() {
+        const column = $(this).data('column');
+        const values = $(this).val() || [];
+
+        if (values.length > 0) {
+            activeFilters[column] = values.map(value => String(value).trim());
+        } else {
+            delete activeFilters[column];
+        }
+
+        debouncedUpdateDisplay(activeFilters);
+    });
+    return activeFilters;
+}
+
+//添加统计表格弹窗生成
+function generateStatsCell(type, metric, displayValue, positions) {
+    // 如果值为0，直接返回不可点击的单元格
+    if (displayValue === 0) return `<td class="stats-cell">0</td>`;
+
+    // 检查是否是 total 行
+    if (metric === 'Total') {
+        return `<td class="stats-cell">${displayValue}</td>`;
     }
 
-    //添加统计表格弹窗生成
-    function generateStatsCell(type, metric, displayValue, positions) {
-        // 如果值为0，直接返回不可点击的单元格
-        if (displayValue === 0) return `<td class="stats-cell">0</td>`;
+    // 计算 Euclid 数量
+    const euclidCount = positions.filter(position => {
+        const matchingKey = Object.entries(window.positions).find(([key, pos]) => {
+            return pos.position === position && pos.type.toUpperCase() === type;
+        })?.[0];
+        if (!matchingKey) return false;
+        const posInfo = positionMap.get(matchingKey);
+        return posInfo?.is_brick === true;  // 直接检查 is_brick
+    }).length;
 
-        // 检查是否是 total 行
-        if (metric === 'Total') {
-            return `<td class="stats-cell">${displayValue}</td>`;
-        }
+    // 生成显示文本
+    const displayText = euclidCount > 0 ? `${displayValue} (${euclidCount})` : displayValue;
 
-        // 计算 Euclid 数量
-        const euclidCount = positions.filter(position => {
-            const matchingKey = Object.entries(window.positions).find(([key, pos]) => {
-                return pos.position === position && pos.type.toUpperCase() === type;
-            })?.[0];
-            if (!matchingKey) return false;
-            const posInfo = positionMap.get(matchingKey);
-            return posInfo?.is_brick === true;  // 直接检查 is_brick
-        }).length;
-
-        // 生成显示文本
-        const displayText = euclidCount > 0 ? `${displayValue} (${euclidCount})` : displayValue;
-
-        return `
+    return `
     <td class="stats-cell clickable"
         data-type="${type}"
         data-metric="${metric}"
@@ -1758,72 +1825,72 @@
         ${displayText}
     </td>
 `;
+}
+
+function setupModalEvents() {
+    const modal = document.querySelector('.position-modal');
+    const backdrop = document.querySelector('.modal-backdrop');
+
+    if (!modal || !backdrop) {
+        console.error('Modal elements not found');
+        return;
     }
 
-    function setupModalEvents() {
-        const modal = document.querySelector('.position-modal');
-        const backdrop = document.querySelector('.modal-backdrop');
+    function closeModal() {
+        modal.style.display = 'none';
+        backdrop.style.display = 'none';
+    }
 
-        if (!modal || !backdrop) {
-            console.error('Modal elements not found');
-            return;
+    // 确保每次打开modal时都重新绑定关闭事件
+    function setupCloseButton() {
+        const closeBtn = modal.querySelector('.modal-close');
+        if (closeBtn) {
+            closeBtn.replaceWith(closeBtn.cloneNode(true));
+            const newCloseBtn = modal.querySelector('.modal-close');
+            newCloseBtn.addEventListener('click', closeModal);
         }
+    }
 
-        function closeModal() {
-            modal.style.display = 'none';
-            backdrop.style.display = 'none';
-        }
+    backdrop.addEventListener('click', closeModal);
 
-        // 确保每次打开modal时都重新绑定关闭事件
-        function setupCloseButton() {
-            const closeBtn = modal.querySelector('.modal-close');
-            if (closeBtn) {
-                closeBtn.replaceWith(closeBtn.cloneNode(true));
-                const newCloseBtn = modal.querySelector('.modal-close');
-                newCloseBtn.addEventListener('click', closeModal);
-            }
-        }
+    document.querySelectorAll('.stats-cell.clickable').forEach(cell => {
+        cell.addEventListener('click', () => {
+            try {
+                // 判断是主表格的单元格还是下游机柜的单元格
+                if (cell.dataset.type && cell.dataset.metric) {
+                    const type = cell.dataset.type;
+                    const metric = cell.dataset.metric;
+                    const positions = JSON.parse(cell.dataset.positions);
 
-        backdrop.addEventListener('click', closeModal);
-
-        document.querySelectorAll('.stats-cell.clickable').forEach(cell => {
-            cell.addEventListener('click', () => {
-                try {
-                    // 判断是主表格的单元格还是下游机柜的单元格
-                    if (cell.dataset.type && cell.dataset.metric) {
-                        const type = cell.dataset.type;
-                        const metric = cell.dataset.metric;
-                        const positions = JSON.parse(cell.dataset.positions);
-
-                        // 获取这些位置中的 Euclid positions
-                        const euclidPositions = positions.filter(position => {
-                            const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
-                                return pos.position === position && pos.type.toUpperCase() === type;
-                            });
-                            if (!matchingPosition) return false;
-                            const [positionKey] = matchingPosition;
-                            const posInfo = positionMap.get(positionKey);
-                            return posInfo?.is_brick === true;
+                    // 获取这些位置中的 Euclid positions
+                    const euclidPositions = positions.filter(position => {
+                        const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
+                            return pos.position === position && pos.type.toUpperCase() === type;
                         });
+                        if (!matchingPosition) return false;
+                        const [positionKey] = matchingPosition;
+                        const posInfo = positionMap.get(positionKey);
+                        return posInfo?.is_brick === true;
+                    });
 
-                        // 生成包含 Euclid 标识的位置文本
-                        const positionsTextWithEuclid = positions
-                        .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
-                        .map(position => {
-                            const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
-                                return pos.position === position && pos.type.toUpperCase() === type;
-                            });
-                            if (!matchingPosition) return position;
-                            const [positionKey] = matchingPosition;
-                            const posInfo = positionMap.get(positionKey);
-                            return posInfo?.is_brick ? `${position}(Euclid)` : position;
-                        })
-                        .join('\n');
+                    // 生成包含 Euclid 标识的位置文本
+                    const positionsTextWithEuclid = positions
+                    .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
+                    .map(position => {
+                        const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
+                            return pos.position === position && pos.type.toUpperCase() === type;
+                        });
+                        if (!matchingPosition) return position;
+                        const [positionKey] = matchingPosition;
+                        const posInfo = positionMap.get(positionKey);
+                        return posInfo?.is_brick ? `${position}(Euclid)` : position;
+                    })
+                    .join('\n');
 
-                        modal.querySelector('.modal-header').innerHTML = `
+                    modal.querySelector('.modal-header').innerHTML = `
                 <div class="modal-title">${type} - ${metric} (${positions.length} positions${
                     euclidPositions.length > 0 ? `, ${euclidPositions.length} Euclid` : ''
-                    })</div>
+                })</div>
                 <div class="modal-actions">
                     <button id="copyPositionsBtn" class="copy-positions-button">
                         <span class="export-icon">📋</span> Copy
@@ -1832,22 +1899,22 @@
                 </div>
             `;
 
-                        // 生成位置列表
-                        modal.querySelector('.position-list').innerHTML = positions
-                            .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
-                            .map(position => {
-                            const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
-                                return pos.position === position && pos.type.toUpperCase() === type;
-                            });
+                    // 生成位置列表
+                    modal.querySelector('.position-list').innerHTML = positions
+                        .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
+                        .map(position => {
+                        const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
+                            return pos.position === position && pos.type.toUpperCase() === type;
+                        });
 
-                            if (!matchingPosition) return '';
+                        if (!matchingPosition) return '';
 
-                            const [positionKey] = matchingPosition;
-                            const posInfo = positionMap.get(positionKey);
-                            const isEuclid = posInfo?.is_brick === true;
-                            const deployedAssetId = posInfo?.deployed_asset_id;
+                        const [positionKey] = matchingPosition;
+                        const posInfo = positionMap.get(positionKey);
+                        const isEuclid = posInfo?.is_brick === true;
+                        const deployedAssetId = posInfo?.deployed_asset_id;
 
-                            return `
+                        return `
                         <div class="position-item ${isEuclid ? 'euclid-position' : ''}">
                             <span class="position-name">${position}</span>
                             ${isEuclid ? `
@@ -1866,36 +1933,36 @@
                             .filter(html => html)
                             .join('');
 
-                        // 添加复制按钮的事件监听器
-                        const copyBtn = modal.querySelector('#copyPositionsBtn');
-                        if (copyBtn) {
-                            // 移除旧的事件监听器
-                            copyBtn.replaceWith(copyBtn.cloneNode(true));
-                            const newCopyBtn = modal.querySelector('#copyPositionsBtn');
+                    // 添加复制按钮的事件监听器
+                    const copyBtn = modal.querySelector('#copyPositionsBtn');
+                    if (copyBtn) {
+                        // 移除旧的事件监听器
+                        copyBtn.replaceWith(copyBtn.cloneNode(true));
+                        const newCopyBtn = modal.querySelector('#copyPositionsBtn');
 
-                            newCopyBtn.addEventListener('click', () => {
-                                copyToClipboard(positionsTextWithEuclid, newCopyBtn);
-                            });
-                        }
+                        newCopyBtn.addEventListener('click', () => {
+                            copyToClipboard(positionsTextWithEuclid, newCopyBtn);
+                        });
+                    }
 
-                        modal.style.display = 'block';
-                        backdrop.style.display = 'block';
-                        setupCloseButton();
-                    } else if (cell.dataset.patchPositions) {
-                        // 处理 Patch rack 的点击
-                        const positions = JSON.parse(cell.dataset.patchPositions);
+                    modal.style.display = 'block';
+                    backdrop.style.display = 'block';
+                    setupCloseButton();
+                } else if (cell.dataset.patchPositions) {
+                    // 处理 Patch rack 的点击
+                    const positions = JSON.parse(cell.dataset.patchPositions);
 
-                        // 生成包含房间号的位置文本
-                        const positionsText = positions
-                        .sort((a, b) => {
-                            const aCompare = `${a.room} ${a.position}`;
-                            const bCompare = `${b.room} ${b.position}`;
-                            return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
-                        })
-                        .map(pos => `${pos.room} ${pos.position}`)
-                        .join('\n');
+                    // 生成包含房间号的位置文本
+                    const positionsText = positions
+                    .sort((a, b) => {
+                        const aCompare = `${a.room} ${a.position}`;
+                        const bCompare = `${b.room} ${b.position}`;
+                        return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
+                    })
+                    .map(pos => `${pos.room} ${pos.position}`)
+                    .join('\n');
 
-                        modal.querySelector('.modal-header').innerHTML = `
+                    modal.querySelector('.modal-header').innerHTML = `
                     <div class="modal-title">Patch racks (${positions.length} positions)</div>
                     <div class="modal-actions">
                         <button id="copyPositionsBtn" class="copy-positions-button">
@@ -1954,17 +2021,17 @@
                             .join('');
                     }
 
-                    modal.style.display = 'block';
-                    backdrop.style.display = 'block';
+                modal.style.display = 'block';
+                backdrop.style.display = 'block';
 
-                } catch (error) {
-                    console.error('Error handling cell click:', error);
-                }
-            });
+            } catch (error) {
+                console.error('Error handling cell click:', error);
+            }
         });
-    }
+    });
+}
 
-    GM_addStyle(`
+GM_addStyle(`
 
 .site-selection-section {
 padding: 20px;
@@ -2827,125 +2894,125 @@ border: 1px solid #e0e0e0;
 height: 43px;
 }
 
-.downstream-stats .stats-cell a,
-.patch-stats .stats-cell a {
-text-align: center;
-display: block;
-width: 100%;
-color: #1976d2;
-}
+    .downstream-stats .stats-cell a,
+        .patch-stats .stats-cell a {
+            text-align: center;
+            display: block;
+            width: 100%;
+            color: #1976d2;
+        }
 
 .downstream-stats .stats-cell.clickable {
-cursor: pointer;
-transition: background-color 0.2s;
+    cursor: pointer;
+    transition: background-color 0.2s;
 }
 
 .downstream-stats .stats-cell.clickable:hover {
-background-color: #f5f5f5;
+    background-color: #f5f5f5;
 }
 
 .progress-container {
-margin: 20px 0;
-padding: 20px;
-background: #f8f9fa;
-border-radius: 8px;
-text-align: center;
+    margin: 20px 0;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    text-align: center;
 }
 
 .progress-bar {
-width: 100%;
-height: 20px;
-background: #e9ecef;
-border-radius: 10px;
-overflow: hidden;
-margin-bottom: 10px;
+    width: 100%;
+    height: 20px;
+    background: #e9ecef;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 10px;
 }
 
 .progress-fill {
-width: 0%;
-height: 100%;
-background: #2196F3;
-transition: width 0.3s ease;
-background-image: linear-gradient(
-45deg,
-rgba(255, 255, 255, 0.15) 25%,
-transparent 25%,
-transparent 50%,
-rgba(255, 255, 255, 0.15) 50%,
-rgba(255, 255, 255, 0.15) 75%,
-transparent 75%,
-transparent
-);
-background-size: 1rem 1rem;
-animation: progress-bar-stripes 1s linear infinite;
+    width: 0%;
+    height: 100%;
+    background: #2196F3;
+    transition: width 0.3s ease;
+    background-image: linear-gradient(
+        45deg,
+        rgba(255, 255, 255, 0.15) 25%,
+        transparent 25%,
+            transparent 50%,
+                rgba(255, 255, 255, 0.15) 50%,
+                    rgba(255, 255, 255, 0.15) 75%,
+                        transparent 75%,
+                            transparent
+                            );
+    background-size: 1rem 1rem;
+    animation: progress-bar-stripes 1s linear infinite;
 }
 
 @keyframes progress-bar-stripes {
-0% { background-position: 1rem 0; }
-100% { background-position: 0 0; }
+    0% { background-position: 1rem 0; }
+    100% { background-position: 0 0; }
 }
 
 .progress-text {
-font-size: 14px;
-color: #666;
-margin-bottom: 5px;
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 5px;
 }
 
 .progress-step {
-font-size: 12px;
-color: #999;
+    font-size: 12px;
+    color: #999;
 }
 
 .export-button-container {
-display: flex;
-justify-content: center;
-margin-top: 15px;
+    display: flex;
+    justify-content: center;
+    margin-top: 15px;
 }
 
 .export-button {
-display: flex;
-align-items: center;
-gap: 4px;
-padding: 6px 12px;
-background-color: #1976d2;
-color: white;
-border: none;
-border-radius: 4px;
-cursor: pointer;
-font-size: 12px;
-transition: background-color 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    background-color: #1976d2;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.2s;
 }
 
 .export-button:hover {
-background-color: #1565c0;
+    background-color: #1565c0;
 }
 
 .export-button.copied {
-background-color: #4caf50;
+    background-color: #4caf50;
 }
 
 .export-icon {
-font-size: 13px;
+    font-size: 13px;
 }
 
 .side-stats {
-display: flex;
-flex-direction: column;
-gap: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
 }
 
 .patch-stats {
-width: 200px;
-vertical-align: middle;
-overflow: hidden;
+    width: 200px;
+    vertical-align: middle;
+    overflow: hidden;
 }
 `);
 
-    // 修改页面加载初始化
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
+// 修改页面加载初始化
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
 
 })();
