@@ -442,6 +442,7 @@
         ];
     }
 
+    window.ahaLoginWindowOpened = false;
 
     // 辅助函数：发送请求
     function makeRequest(url, method, retryCount = 0) {
@@ -457,88 +458,80 @@
                     "Accept": "application/json",
                     "X-Requested-With": "XMLHttpRequest",
                 },
-                timeout: 30000,
+                timeout: 40000,
                 withCredentials: true,
                 onload: function(response) {
-                    console.log(`Response from ${url}:`, {
-                        status: response.status,
-                        statusText: response.statusText,
-                        finalUrl: response.finalUrl,
-                        responseText: response.responseText ?
-                            (response.responseText.substring(0, 200) + '...') :
-                            'No response text'
-                    });
+                    // 如果是 AHA 请求
+                    if (url.includes('aha.bjs.aws-border.cn')) {
+                        // 检查认证状态
+                        if (response.status === 401 || response.status === 403 ||
+                            response.finalUrl?.includes('midway-auth')) {
+                            // 如果还没打开过登录窗口
+                            if (!window.ahaLoginWindowOpened) {
+                                console.log('Opening AHA login page');
+                                window.open('https://midway-auth.aws-border.cn/login', '_blank');
+                                window.ahaLoginWindowOpened = true;
+                            }
+                            // 直接返回，不进行重试
+                            resolve({
+                                status: 200,
+                                responseText: '{}' // 返回空数据
+                            });
+                            return;
+                        }
+                    }
 
+                    // 其他请求的正常处理
                     if (response.status === 200) {
                         resolve(response);
-                    } else if (response.status === 401 || response.status === 403 ||
-                               response.responseText.includes('login') ||
-                               response.finalUrl?.includes('midway-auth') ||
-                               response.finalUrl?.includes('sentry.amazon.com')) {
-
-                        console.log('Authentication required for:', url);
-
-                        // 根据 URL 决定打开哪个登录页面
-                        let loginUrl = 'https://cloudforge-build.amazon.com/';
-                        if (url.includes('aha.bjs.aws-border.cn')) {
-                            loginUrl = 'https://midway-auth.aws-border.cn/login';
-                        }
-
-                        console.log('Opening login page:', loginUrl);
-                        window.open(loginUrl, '_blank');
-
-                        // 如果还有重试次数，等待后重试
+                    } else if (url.includes('cloudforge-build.amazon.com') &&
+                               (response.status === 401 || response.status === 403 ||
+                                response.finalUrl?.includes('sentry.amazon.com'))) {
+                        // Cloudforge 认证错误处理
                         if (retryCount < maxRetries) {
-                            console.log(`Will retry ${url} in ${retryDelay * (retryCount + 1)}ms`);
+                            console.log('Opening Cloudforge login page');
+                            window.open('https://cloudforge-build.amazon.com/', '_blank');
                             setTimeout(() => {
                                 makeRequest(url, method, retryCount + 1)
                                     .then(resolve)
                                     .catch(reject);
                             }, retryDelay * (retryCount + 1));
                         } else {
-                            console.error('Max retries reached for authentication');
-                            reject(new Error('Authentication required. Please login and try again.'));
+                            reject(new Error('Please login to Cloudforge first'));
                         }
                     } else {
-                        // 如果是其他错误且还有重试次数
                         if (retryCount < maxRetries) {
-                            console.log(`Request failed, will retry ${url} in ${retryDelay * (retryCount + 1)}ms`);
                             setTimeout(() => {
                                 makeRequest(url, method, retryCount + 1)
                                     .then(resolve)
                                     .catch(reject);
                             }, retryDelay * (retryCount + 1));
                         } else {
-                            console.error('Max retries reached for request');
                             reject(new Error(`Request failed with status ${response.status}`));
                         }
                     }
                 },
                 onerror: function(error) {
                     console.error(`Error for ${url}:`, error);
-                    if (retryCount < maxRetries) {
-                        console.log(`Network error, will retry ${url} in ${retryDelay * (retryCount + 1)}ms`);
+                    if (retryCount < maxRetries && !url.includes('aha.bjs.aws-border.cn')) {
                         setTimeout(() => {
                             makeRequest(url, method, retryCount + 1)
                                 .then(resolve)
                                 .catch(reject);
                         }, retryDelay * (retryCount + 1));
                     } else {
-                        console.error('Max retries reached after network error');
                         reject(error);
                     }
                 },
                 ontimeout: function() {
                     console.error(`Timeout for ${url}`);
-                    if (retryCount < maxRetries) {
-                        console.log(`Request timed out, will retry ${url} in ${retryDelay * (retryCount + 1)}ms`);
+                    if (retryCount < maxRetries && !url.includes('aha.bjs.aws-border.cn')) {
                         setTimeout(() => {
                             makeRequest(url, method, retryCount + 1)
                                 .then(resolve)
                                 .catch(reject);
                         }, retryDelay * (retryCount + 1));
                     } else {
-                        console.error('Max retries reached after timeout');
                         reject(new Error('Request timed out'));
                     }
                 }
