@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -104,29 +104,29 @@
         const siteSection = document.createElement('div');
         siteSection.className = 'site-selection-section';
         siteSection.innerHTML = `
-        <h2>Select Data Center Site</h2>
-        <div class="custom-dropdown">
-            <div class="selected-option" tabindex="0">Select a Site</div>
-            <ul class="dropdown-options">
-                ${AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
-            </ul>
-        </div>
-    `;
+    <h2>Select Data Center Site</h2>
+    <div class="custom-dropdown">
+        <div class="selected-option" tabindex="0">Select a Site</div>
+        <ul class="dropdown-options">
+            ${AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
+        </ul>
+    </div>
+`;
         container.appendChild(siteSection);
 
         // 添加模态框结构
         const modalHtml = `
-            <div class="modal-backdrop"></div>
-            <div class="position-modal">
-                <div class="modal-header">
-                    <div class="modal-title"></div>
-                    <div class="modal-close">&times;</div>
-                </div>
-                <div class="modal-content">
-                    <div class="position-list"></div>
-                </div>
+        <div class="modal-backdrop"></div>
+        <div class="position-modal">
+            <div class="modal-header">
+                <div class="modal-title"></div>
+                <div class="modal-close">&times;</div>
             </div>
-        `;
+            <div class="modal-content">
+                <div class="position-list"></div>
+            </div>
+        </div>
+    `;
 
         // 创建模态框容器并添加到 container
         const modalContainer = document.createElement('div');
@@ -149,12 +149,12 @@
         const progressContainer = document.createElement('div');
         progressContainer.className = 'progress-container';
         progressContainer.innerHTML = `
-        <div class="progress-bar">
-            <div class="progress-fill"></div>
-        </div>
-        <div class="progress-text">Loading: <span class="progress-percentage">0%</span></div>
-        <div class="progress-step">Initializing...</div>
-    `;
+    <div class="progress-bar">
+        <div class="progress-fill"></div>
+    </div>
+    <div class="progress-text">Loading: <span class="progress-percentage">0%</span></div>
+    <div class="progress-step">Initializing...</div>
+`;
         progressContainer.style.display = 'none';
         container.appendChild(progressContainer);
 
@@ -228,7 +228,7 @@
 
                     if (currentTopoView && currentFiltersContainer) {
                         updateProgress(95, 'Initializing filters...');
-                        initializeFilters(currentFiltersContainer);
+                        window.filtersInitialized = false;
 
                         updateProgress(100, 'Completing😎...');
                         setTimeout(() => {
@@ -236,7 +236,7 @@
                             currentFiltersContainer.style.display = 'grid';
                             currentTopoView.style.display = 'block';
                             updateDisplay({});
-                        }, 500); // 给用户一个短暂的时间看到100%
+                        }, 100);
                     } else {
                         throw new Error('Required display elements not found');
                     }
@@ -522,7 +522,7 @@
             position: `https://cloudforge-build.amazon.com/datacenters/${site}/equipments/floorplans/positions.json`,
             network: `https://cloudforge-build.amazon.com/datacenters/${site}/floorplans/network_connectivity.json`,
             euclid: `https://aha.bjs.aws-border.cn/blast-radius/api/get-euclid-bricks-for-site/${site}`
-    };
+        };
 
         try {
             // 使用 Promise.allSettled 并行处理所有请求
@@ -622,30 +622,27 @@
                     const isDeployed = !!item.deployed_asset_id;
 
                     // 只有在 deployed 状态时才处理 type
-                    let finalType = 'unknown';
-                    if (isDeployed) {
-                        let originalType = item.intended_customer || 'unknown';
-                        finalType = RACK_TYPE_MAPPING[originalType] || originalType;
+                    let rackType = 'unknown';
+                    if (item.intended_customer) {
+                        rackType = RACK_TYPE_MAPPING[item.intended_customer] || 'unknown';
 
-                        // 特殊处理：如果功率为0且是网络类型，则标记为 Patch
-                        const powerKva = parseFloat(item.power_kva);
-                        const isPowerZeroOrNA = isNaN(powerKva) || powerKva === 0;
-                        if (isPowerZeroOrNA && finalType.toLowerCase() === 'network') {
-                            finalType = 'Patch';
+                        // 如果类型是 unknown 或 intended_customer 是 ANY，则直接使用 uplink_fabric
+                        if (rackType === 'unknown' || item.intended_customer === 'ANY') {
+                            rackType = item.uplink_fabric.toUpperCase();
                         }
                     }
 
                     newPositionMap.set(`${item.room_name}-${item.name}`, {
                         status: item.disabled ? 'disabled' :
                         (isDeployed ? 'deployed' : 'undeployed'),
-                        type: finalType.toUpperCase(),
+                        type: rackType.toUpperCase(),
                         power_kva: parseFloat(item.power_kva),
                         power_redundancy: item.power_redundancy,
                         deployed_asset_id: item.deployed_asset_id || null,
                         room_name: item.room_name,
                         name: item.name,
                         hasEuclidAccess: hasEuclidAccess,
-                        is_brick: networkInfo.is_brick,  // 添加 is_brick 属性
+                        is_brick: networkInfo.is_brick,
                         downstreamRacks: euclidInfo?.downstreamRacks || null
                     });
                 });
@@ -670,6 +667,7 @@
             }
         };
         const topoView = document.querySelector('.topo-view');
+        const filtersContainer = document.querySelector('.filters-container');
         if (!topoView) {
             console.error('Topo view element not found');
             return;
@@ -892,7 +890,8 @@
 
                 // 先统计所有 Patch 类型的机柜，不考虑电力信息
                 Array.from(positionMap.entries()).forEach(([positionKey, posInfo]) => {
-                    if (posInfo?.status === 'deployed' && posInfo?.type?.toUpperCase() === 'PATCH') {
+                    // 移除 status 检查，只要是 PATCH 类型就计数
+                    if (posInfo?.type?.toUpperCase() === 'PATCH') {
                         stats.patchRacks.total++;
                         stats.patchRacks.positions.push({
                             room: posInfo.room_name,
@@ -1107,107 +1106,107 @@
 
             // 生成统计表格 HTML
             const statsHtml = `
-                <div class="stats-container">
-                    <div class="stats-tables-wrapper">
-                        <div class="stats-details">
-                            <table class="stats-table">
-                                <thead>
-                                    <tr>
-                                        <th>Power Status</th>
-                                        ${activeRackTypes
+            <div class="stats-container">
+                <div class="stats-tables-wrapper">
+                    <div class="stats-details">
+                        <table class="stats-table">
+                            <thead>
+                                <tr>
+                                    <th>Power Status</th>
+                                    ${activeRackTypes
             .filter(type => type !== 'PATCH')
             .map(type => `<th>${type === 'NETWORK' ? 'NETWORK(Euclid)' : type}</th>`)
             .join('')}
-                                        <th>Total</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss'].map(metric => {
-                                        const rowValues = activeRackTypes
-                                        .filter(type => type !== 'PATCH')
-                                        .map(type => {
-                                            const total = stats.detailedStats[type][metric];
-                                            const positionsArray = getPositionsForMetric(window.positions, type, metric);
-                                            return generateStatsCell(type, metric, total, positionsArray);
-                                        });
-                                        const rowTotal = activeRackTypes
-                                        .filter(type => type !== 'PATCH')
-                                        .reduce((sum, type) => sum + (stats.detailedStats[type][metric] || 0), 0);
-                                        return `
-                                            <tr>
-                                                <td>${metric}</td>
-                                                ${rowValues.join('')}
-                                                <td class="stats-cell">${rowTotal}</td>
-                                            </tr>
-                                        `;
-                                    }).join('')}
-                                    <tr class="total-row">
-                                        <td>Total</td>
-                                        ${activeRackTypes
+                                    <th>Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss'].map(metric => {
+                                    const rowValues = activeRackTypes
+                                    .filter(type => type !== 'PATCH')
+                                    .map(type => {
+                                        const total = stats.detailedStats[type][metric];
+                                        const positionsArray = getPositionsForMetric(window.positions, type, metric);
+                                        return generateStatsCell(type, metric, total, positionsArray);
+                                    });
+                                    const rowTotal = activeRackTypes
+                                    .filter(type => type !== 'PATCH')
+                                    .reduce((sum, type) => sum + (stats.detailedStats[type][metric] || 0), 0);
+                                    return `
+                                        <tr>
+                                            <td>${metric}</td>
+                                            ${rowValues.join('')}
+                                            <td class="stats-cell">${rowTotal}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                                <tr class="total-row">
+                                    <td>Total</td>
+                                    ${activeRackTypes
             .filter(type => type !== 'PATCH')
             .map(type => {
                 const totalCount = ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss']
                 .reduce((sum, metric) => sum + (stats.detailedStats[type][metric] || 0), 0);
                 return generateStatsCell(type, 'Total', totalCount, []);
             }).join('')}
-                                        <td class="stats-cell">${
-                                            activeRackTypes
+                                    <td class="stats-cell">${
+                                        activeRackTypes
             .filter(type => type !== 'PATCH')
             .reduce((sum, type) =>
                     sum + ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss']
                     .reduce((subSum, metric) => subSum + (stats.detailedStats[type][metric] || 0), 0), 0)
             }</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="side-stats">
-                            ${Array.from(positionMap.values()).some(info => info.hasEuclidAccess) && downstreamStats.totalUniqueDownstream > 0 ? `
-                                <div class="downstream-stats">
-                                    <table class="stats-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Network-connected rack</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr>
-                                                <td class="stats-cell clickable"
-                                                    data-positions='${JSON.stringify(downstreamRacksList)}'>
-                                                    ${downstreamStats.totalUniqueDownstream}
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ` : ''}
-                            ${stats.patchRacks.total > 0 ? `
-                                <div class="patch-stats">
-                                    <table class="stats-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Patch rack</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <tr>
-                                                <td class="stats-cell clickable"
-                                                    data-patch-positions='${JSON.stringify(stats.patchRacks.positions)}'>
-                                                    ${stats.patchRacks.total}
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ` : ''}
-                        </div>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
-                    <div class="export-button-container">
-                        <button id="exportStatsBtn" class="export-button">
-                            <span class="export-icon">📋</span> Copy
-                        </button>
+                    <div class="side-stats">
+                        ${Array.from(positionMap.values()).some(info => info.hasEuclidAccess) && downstreamStats.totalUniqueDownstream > 0 ? `
+                            <div class="downstream-stats">
+                                <table class="stats-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Network-connected rack</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td class="stats-cell clickable"
+                                                data-positions='${JSON.stringify(downstreamRacksList)}'>
+                                                ${downstreamStats.totalUniqueDownstream}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : ''}
+                        ${stats.patchRacks.total > 0 ? `
+                            <div class="patch-stats">
+                                <table class="stats-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Patch rack</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td class="stats-cell clickable"
+                                                data-patch-positions='${JSON.stringify(stats.patchRacks.positions)}'>
+                                                ${stats.patchRacks.total}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : ''}
                     </div>
-                </div>`;
+                </div>
+                <div class="export-button-container">
+                    <button id="exportStatsBtn" class="export-button">
+                        <span class="export-icon">📋</span> Copy
+                    </button>
+                </div>
+            </div>`;
 
             // 渲染结果
             const positionsHtml = Object.entries(positions)
@@ -1223,105 +1222,120 @@
                 const isEuclid = positionInfo.is_brick === true;
 
                 return `
-                <div class="topo-item ${isEuclid ? 'euclid-brick' : ''}">
-                    <div class="topo-item-header">
-                        <div class="position-info">
-                            <span class="status-indicator status-${positionInfo.status.toLowerCase() || 'unknown'}"></span>
-                            <span class="position-id">${positionInfo.room_name} ${positionInfo.name}</span>
-                            ${positionInfo.status === 'deployed' ?
+            <div class="topo-item ${isEuclid ? 'euclid-brick' : ''}">
+                <div class="topo-item-header">
+                    <div class="position-info">
+                        <span class="status-indicator status-${positionInfo.status.toLowerCase() || 'unknown'}"></span>
+                        <span class="position-id">${positionInfo.room_name} ${positionInfo.name}</span>
+                        ${positionInfo.status === 'deployed' ?
                     `<span class="rack-type">${positionInfo.type || 'Unknown'}</span>` :
                 ''
             }
-                            ${positionInfo.power_redundancy ?
+                        ${positionInfo.power_redundancy ?
                     `<span class="power-redundancy">(${positionInfo.power_redundancy})</span>` :
                 ''
             }
-                            ${isEuclid ?
+                        ${isEuclid ?
                     `<span class="euclid-tag">
-                                    ${positionInfo.deployed_asset_id ?
+                                ${positionInfo.deployed_asset_id ?
                     `<a href="https://aha.bjs.aws-border.cn/host-monitoring/euclid/${positionInfo.deployed_asset_id}"
-                                            target="_blank"
-                                            class="euclid-link">Euclid</a>` :
+                                        target="_blank"
+                                        class="euclid-link">Euclid</a>` :
                 'Euclid'
             }
-                                </span>` :
+                            </span>` :
                 ''
             }
-                        </div>
-                        <div class="position-tags">
-                            <span class="filter-tag status-tag-${positionInfo.status.toLowerCase() || 'unknown'}">
-                                ${positionInfo.status || 'Unknown'}
-                            </span>
-                            <span class="filter-tag">Circuits: ${position.powerChains.length}</span>
-                            ${positionInfo.power_kva ?
+                    </div>
+                    <div class="position-tags">
+                        <span class="filter-tag status-tag-${positionInfo.status.toLowerCase() || 'unknown'}">
+                            ${positionInfo.status || 'Unknown'}
+                        </span>
+                        <span class="filter-tag">Circuits: ${position.powerChains[0]?.circuit?.name === 'N/A' ? 0 : position.powerChains.length}</span>
+                        ${positionInfo.power_kva ?
                     `<span class="filter-tag">Power: ${positionInfo.power_kva} kVA</span>` :
                 ''
             }
-                        </div>
-                    </div>
-                    <div class="topo-item-content">
-                        ${position.powerChains.map(chain => `
-                            <div class="power-chain ${chain.powerFeed === 'N/A' ? 'power-chain-na' : `power-chain-${chain.powerFeed.toLowerCase()}`}">
-                                <div class="chain-header">
-                                    ${chain.powerFeed === 'N/A' ? 'No Power Chain Data' : `Power Feed: ${chain.powerFeed}`}
-                                </div>
-                                <div class="chain-path">
-                                    <div class="chain-item">
-                                        <div class="chain-label">Circuit</div>
-                                        <div class="chain-value">${chain.circuit.name}</div>
-                                    </div>
-                                    <div class="chain-arrow">→</div>
-                                    <div class="chain-item">
-                                        <div class="chain-label">PDU</div>
-                                        <div class="chain-value">${chain.pdu.name}</div>
-                                    </div>
-                                    <div class="chain-arrow">→</div>
-                                    <div class="chain-item">
-                                        <div class="chain-label">UPS</div>
-                                        <div class="chain-value">${chain.upsGroup}</div>
-                                    </div>
-                                    <div class="chain-arrow">→</div>
-                                    <div class="chain-item">
-                                        <div class="chain-label">USB</div>
-                                        <div class="chain-value">${chain.usb}</div>
-                                    </div>
-                                    <div class="chain-arrow">→</div>
-                                    <div class="chain-item">
-                                        <div class="chain-label">Transformer</div>
-                                        <div class="chain-value">${chain.routingInfo?.transformer || 'N/A'}</div>
-                                    </div>
-                                    <div class="chain-arrow">→</div>
-                                    <div class="chain-item">
-                                        <div class="chain-label">Utility</div>
-                                        <div class="chain-value">${chain.routingInfo?.utility || 'N/A'}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('')}
                     </div>
                 </div>
-            `;
+                <div class="topo-item-content">
+                    ${position.powerChains.map(chain => `
+                        <div class="power-chain ${chain.powerFeed === 'N/A' ? 'power-chain-na' : `power-chain-${chain.powerFeed.toLowerCase()}`}">
+                            <div class="chain-header">
+                                ${chain.powerFeed === 'N/A' ? 'No Power Chain Data' : `Power Feed: ${chain.powerFeed}`}
+                            </div>
+                            <div class="chain-path">
+                                <div class="chain-item">
+                                    <div class="chain-label">Circuit</div>
+                                    <div class="chain-value">${chain.circuit.name}</div>
+                                </div>
+                                <div class="chain-arrow">→</div>
+                                <div class="chain-item">
+                                    <div class="chain-label">PDU</div>
+                                    <div class="chain-value">${chain.pdu.name}</div>
+                                </div>
+                                <div class="chain-arrow">→</div>
+                                <div class="chain-item">
+                                    <div class="chain-label">UPS</div>
+                                    <div class="chain-value">${chain.upsGroup}</div>
+                                </div>
+                                <div class="chain-arrow">→</div>
+                                <div class="chain-item">
+                                    <div class="chain-label">USB</div>
+                                    <div class="chain-value">${chain.usb}</div>
+                                </div>
+                                <div class="chain-arrow">→</div>
+                                <div class="chain-item">
+                                    <div class="chain-label">Transformer</div>
+                                    <div class="chain-value">${chain.routingInfo?.transformer || 'N/A'}</div>
+                                </div>
+                                <div class="chain-arrow">→</div>
+                                <div class="chain-item">
+                                    <div class="chain-label">Utility</div>
+                                    <div class="chain-value">${chain.routingInfo?.utility || 'N/A'}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
             }).join('');
 
+            let contentContainer = topoView.querySelector('.content-container');
+            if (!contentContainer) {
+                contentContainer = document.createElement('div');
+                contentContainer.className = 'content-container';
+                topoView.appendChild(contentContainer);
+            }
 
-            const fragment = document.createDocumentFragment();
+            // 更新统计信息
+            const statsContainer = contentContainer.querySelector('.stats-container');
+            if (statsContainer) {
+                statsContainer.innerHTML = statsHtml;
+            } else {
+                const newStatsContainer = document.createElement('div');
+                newStatsContainer.className = 'stats-container';
+                newStatsContainer.innerHTML = statsHtml;
+                contentContainer.appendChild(newStatsContainer);
+            }
 
-            // 添加统计信息
-            const statsContainer = document.createElement('div');
-            statsContainer.className = 'stats-container';
-            statsContainer.innerHTML = statsHtml;
-            fragment.appendChild(statsContainer);
+            // 更新位置信息
+            const positionsContainer = contentContainer.querySelector('.positions-container');
+            if (positionsContainer) {
+                positionsContainer.innerHTML = positionsHtml;
+            } else {
+                const newPositionsContainer = document.createElement('div');
+                newPositionsContainer.className = 'positions-container';
+                newPositionsContainer.innerHTML = positionsHtml;
+                contentContainer.appendChild(newPositionsContainer);
+            }
 
-            // 添加位置信息
-            const positionsContainer = document.createElement('div');
-            positionsContainer.className = 'topo-view';
-            positionsContainer.innerHTML = positionsHtml;
-            fragment.appendChild(positionsContainer);
-
-            // 清空并添加新内容
-            topoView.innerHTML = '';
-            topoView.appendChild(fragment);
-
+            // 只在第一次初始化筛选器
+            if (!window.filtersInitialized) {
+                initializeFilters(filtersContainer, stats);
+                window.filtersInitialized = true;
+            }
             function getPositionsForMetric(positionsObj, type, metric) {
                 const result = [];
                 Object.entries(positionsObj).forEach(([key, position]) => {
@@ -1438,10 +1452,10 @@
         } catch (error) {
             console.error('Error updating display:', error);
             topoView.innerHTML = `
-                <div class="error-message">
-                    Failed to update display: ${error.message}
-                </div>
-            `;
+            <div class="error-message">
+                Failed to update display: ${error.message}
+            </div>
+        `;
         }
     }
 
@@ -1571,7 +1585,7 @@
     }
 
     // 初始化筛选器
-    function initializeFilters(filtersContainer) {
+    function initializeFilters(filtersContainer, stats) {
         if (typeof jQuery === 'undefined') {
             throw new Error('jQuery is not loaded');
         }
@@ -1614,15 +1628,22 @@
                     .forEach(position => {
                     select.append(new Option(position, position));
                 });
-            } else if (filter.column === 'type') {
-                const types = [...new Set(
-                    Array.from(positionMap.values())
-                    .map(info => info.type)
-                    .filter(Boolean)
-                )];
-                types.sort().forEach(type => {
-                    select.append(new Option(type, type));
-                });
+            } else if (filter.column === 'type' && stats) {
+                const activeRackTypes = Object.keys(stats.detailedStats)
+                .filter(type => {
+                    return stats.detailedStats[type]['Total'] > 0 ||
+                        (type === 'PATCH' && stats.patchRacks && stats.patchRacks.total > 0);
+                })
+                .sort();
+                select.empty();
+                if (activeRackTypes.length > 0) {
+                    activeRackTypes.forEach(type => {
+                        const option = new Option(type, type);
+                        select.append(option);
+                    });
+                } else {
+                    select.append(new Option('No Types Available', ''));
+                }
             } else if (filter.column === 'status') {
                 ['deployed', 'undeployed', 'disabled'].forEach(status => {
                     select.append(new Option(
@@ -1730,13 +1751,13 @@
         const displayText = euclidCount > 0 ? `${displayValue} (${euclidCount})` : displayValue;
 
         return `
-        <td class="stats-cell clickable"
-            data-type="${type}"
-            data-metric="${metric}"
-            data-positions='${JSON.stringify(positions)}'>
-            ${displayText}
-        </td>
-    `;
+    <td class="stats-cell clickable"
+        data-type="${type}"
+        data-metric="${metric}"
+        data-positions='${JSON.stringify(positions)}'>
+        ${displayText}
+    </td>
+`;
     }
 
     function setupModalEvents() {
@@ -1800,16 +1821,16 @@
                         .join('\n');
 
                         modal.querySelector('.modal-header').innerHTML = `
-                    <div class="modal-title">${type} - ${metric} (${positions.length} positions${
-                        euclidPositions.length > 0 ? `, ${euclidPositions.length} Euclid` : ''
+                <div class="modal-title">${type} - ${metric} (${positions.length} positions${
+                    euclidPositions.length > 0 ? `, ${euclidPositions.length} Euclid` : ''
                     })</div>
-                    <div class="modal-actions">
-                        <button id="copyPositionsBtn" class="copy-positions-button">
-                            <span class="export-icon">📋</span> Copy
-                        </button>
-                        <div class="modal-close">&times;</div>
-                    </div>
-                `;
+                <div class="modal-actions">
+                    <button id="copyPositionsBtn" class="copy-positions-button">
+                        <span class="export-icon">📋</span> Copy
+                    </button>
+                    <div class="modal-close">&times;</div>
+                </div>
+            `;
 
                         // 生成位置列表
                         modal.querySelector('.position-list').innerHTML = positions
@@ -1827,20 +1848,20 @@
                             const deployedAssetId = posInfo?.deployed_asset_id;
 
                             return `
-                            <div class="position-item ${isEuclid ? 'euclid-position' : ''}">
-                                <span class="position-name">${position}</span>
-                                ${isEuclid ? `
-                                    <span class="euclid-indicator">
-                                        ${deployedAssetId ?
+                        <div class="position-item ${isEuclid ? 'euclid-position' : ''}">
+                            <span class="position-name">${position}</span>
+                            ${isEuclid ? `
+                                <span class="euclid-indicator">
+                                    ${deployedAssetId ?
                                 `<a href="https://aha.bjs.aws-border.cn/host-monitoring/euclid/${deployedAssetId}"
-                                                target="_blank"
-                                                class="euclid-link">Euclid</a>` :
+                                            target="_blank"
+                                            class="euclid-link">Euclid</a>` :
                             'Euclid'
                         }
-                                    </span>
-                                ` : ''}
-                            </div>
-                        `;
+                                </span>
+                            ` : ''}
+                        </div>
+                    `;
                         })
                             .filter(html => html)
                             .join('');
@@ -1875,14 +1896,14 @@
                         .join('\n');
 
                         modal.querySelector('.modal-header').innerHTML = `
-                        <div class="modal-title">Patch racks (${positions.length} positions)</div>
-                        <div class="modal-actions">
-                            <button id="copyPositionsBtn" class="copy-positions-button">
-                                <span class="export-icon">📋</span> Copy
-                            </button>
-                            <div class="modal-close">&times;</div>
-                        </div>
-                    `;
+                    <div class="modal-title">Patch racks (${positions.length} positions)</div>
+                    <div class="modal-actions">
+                        <button id="copyPositionsBtn" class="copy-positions-button">
+                            <span class="export-icon">📋</span> Copy
+                        </button>
+                        <div class="modal-close">&times;</div>
+                    </div>
+                `;
 
                         modal.querySelector('.position-list').innerHTML = positions
                             .sort((a, b) => {
@@ -1891,10 +1912,10 @@
                             return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
                         })
                             .map(position => `
-                            <div class="position-item">
-                                <span class="position-name">${position.room} ${position.position}</span>
-                            </div>
-                        `).join('');
+                        <div class="position-item">
+                            <span class="position-name">${position.room} ${position.position}</span>
+                        </div>
+                    `).join('');
 
                         // 添加复制按钮的事件监听器
                         const copyBtn = modal.querySelector('#copyPositionsBtn');
@@ -1925,10 +1946,10 @@
                             .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
                             .map(position => {
                             return `
-                                <div class="position-item">
-                                    <span class="position-name">${position.position}</span>
-                                </div>
-                            `;
+                            <div class="position-item">
+                                <span class="position-name">${position.position}</span>
+                            </div>
+                        `;
                         })
                             .join('');
                     }
@@ -1944,85 +1965,86 @@
     }
 
     GM_addStyle(`
+
 .site-selection-section {
-    padding: 20px;
-    margin-bottom: 20px;
-    background: #f8f9fa;
-    border-radius: 6px;
-    text-align: center;
+padding: 20px;
+margin-bottom: 20px;
+background: #f8f9fa;
+border-radius: 6px;
+text-align: center;
 }
 
 .site-selection-section h2 {
-    margin-bottom: 15px;
-    color: #1976d2;
+margin-bottom: 15px;
+color: #1976d2;
 }
 
 .custom-dropdown {
-    position: relative;
-    width: 300px;
-    margin: 0 auto;
+position: relative;
+width: 300px;
+margin: 0 auto;
 }
 
 .selected-option {
-    padding: 10px 15px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    background-color: white;
-    cursor: pointer;
-    user-select: none;
+padding: 10px 15px;
+border: 1px solid #ddd;
+border-radius: 4px;
+background-color: white;
+cursor: pointer;
+user-select: none;
 }
 
 .selected-option:hover {
-    background-color: #f8f9fa;
+background-color: #f8f9fa;
 }
 
 .selected-option:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
+outline: none;
+box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.2);
 }
 
 .dropdown-options {
-    display: none;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    max-height: 200px;
-    overflow-y: auto;
-    background-color: white;
-    border: 1px solid #ddd;
-    border-top: none;
-    border-radius: 0 0 4px 4px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    z-index: 1000;
+display: none;
+position: absolute;
+top: 100%;
+left: 0;
+right: 0;
+max-height: 200px;
+overflow-y: auto;
+background-color: white;
+border: 1px solid #ddd;
+border-top: none;
+border-radius: 0 0 4px 4px;
+box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+z-index: 1000;
 }
 
 .dropdown-options li {
-    padding: 10px 15px;
-    cursor: pointer;
+padding: 10px 15px;
+cursor: pointer;
 }
 
 .dropdown-options li:hover {
-    background-color: #f8f9fa;
+background-color: #f8f9fa;
 }
 
 .loading-indicator {
-    margin-top: 15px;
-    color: #1976d2;
-    font-weight: bold;
+margin-top: 15px;
+color: #1976d2;
+font-weight: bold;
 }
 
 /* 基础容器样式 */
 .topo-container {
-    width: 100%;
-    background: white;
-    padding: 20px;
-    border: 1px solid #ccc;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    margin: 20px 0;
-    display: flex;
-    flex-direction: column;
+width: 100%;
+background: white;
+padding: 20px;
+border: 1px solid #ccc;
+border-radius: 8px;
+box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+margin: 20px 0;
+display: flex;
+flex-direction: column;
 }
 
 /* 筛选器容器样式调整 */
@@ -2235,7 +2257,7 @@ padding: 0 15px;
 }
 
 .stats-table {
-    margin: 15px 0;
+margin: 15px 0;
 }
 
 }
@@ -2425,8 +2447,8 @@ gap: 10px;
 }
 
 .chain-item {
-    min-width: 120px;
-    padding: 8px 12px;
+min-width: 120px;
+padding: 8px 12px;
 }
 
 }
@@ -2596,21 +2618,21 @@ border-radius: 4px;
 }
 
 .position-modal {
-    display: none;
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background-color: white;
-    padding: 20px;
-    border-radius: 10px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-    z-index: 1000;
-    min-width: 400px;
-    max-width: 90vw;
-    max-height: 80vh;
-    overflow-y: auto;
-    width: auto;
+display: none;
+position: fixed;
+top: 50%;
+left: 50%;
+transform: translate(-50%, -50%);
+background-color: white;
+padding: 20px;
+border-radius: 10px;
+box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+z-index: 1000;
+min-width: 400px;
+max-width: 90vw;
+max-height: 80vh;
+overflow-y: auto;
+width: auto;
 }
 
 .modal-header {
@@ -2675,85 +2697,85 @@ margin-bottom: 15px;
 }
 
 .position-list {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(100px, auto));
-    gap: 10px;
-    padding: 10px;
-    width: fit-content;
-    margin: 0 auto;
+display: grid;
+grid-template-columns: repeat(3, minmax(100px, auto));
+gap: 10px;
+padding: 10px;
+width: fit-content;
+margin: 0 auto;
 }
 
 .position-item {
-    padding: 8px 12px;
-    background: #f8f9fa;
-    border-radius: 4px;
-    border: 1px solid #e0e0e0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-width: 100px;
-    width: auto;
+padding: 8px 12px;
+background: #f8f9fa;
+border-radius: 4px;
+border: 1px solid #e0e0e0;
+display: flex;
+align-items: center;
+justify-content: space-between;
+min-width: 100px;
+width: auto;
 }
 
 .position-name {
-    flex: 0 0 auto;
-    margin-right: 10px;
+flex: 0 0 auto;
+margin-right: 10px;
 }
 
 .euclid-indicator {
-    flex: 0 0 auto;
-    background-color: #2196F3;
-    color: white;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 0.8em;
-    white-space: nowrap;
+flex: 0 0 auto;
+background-color: #2196F3;
+color: white;
+padding: 2px 6px;
+border-radius: 3px;
+font-size: 0.8em;
+white-space: nowrap;
 }
 
 .euclid-indicator a {
-    color: white !important;
-    text-decoration: none;
+color: white !important;
+text-decoration: none;
 }
 
 .euclid-indicator a:hover {
-    text-decoration: underline;
+text-decoration: underline;
 }
 
 .euclid-position {
-    background-color: #E3F2FD !important;
-    border: 1px solid #90CAF9 !important;
+background-color: #E3F2FD !important;
+border: 1px solid #90CAF9 !important;
 }
 
 @media (max-width: 480px) {
-    .position-list {
-        grid-template-columns: 1fr;
-    }
+.position-list {
+grid-template-columns: 1fr;
+}
 }
 
 .stats-cell.clickable {
-    cursor: pointer;
-    transition: background-color 0.2s;
+cursor: pointer;
+transition: background-color 0.2s;
 }
 
 .stats-cell.clickable:hover {
-    background-color: #f5f5f5;  /* hover时的背景色 */
+background-color: #f5f5f5;  /* hover时的背景色 */
 }
 
 .modal-backdrop {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: rgba(0,0,0,0.5);
-    z-index: 999;
+display: none;
+position: fixed;
+top: 0;
+left: 0;
+right: 0;
+bottom: 0;
+background-color: rgba(0,0,0,0.5);
+z-index: 999;
 }
 
 .stats-tables-wrapper {
-    display: flex;
-    gap: 20px;
-    align-items: flex-start;
+display: flex;
+gap: 20px;
+align-items: flex-start;
 }
 
 .stats-details {
@@ -2761,56 +2783,56 @@ flex: 1;
 }
 
 .downstream-stats {
-    width: 200px;
-    vertical-align: middle;
-    overflow: hidden;
+width: 200px;
+vertical-align: middle;
+overflow: hidden;
 }
 
 .stats-table {
-    width: 120px;
-    max-width: 100%;
-    box-sizing: border-box;
+width: 120px;
+max-width: 100%;
+box-sizing: border-box;
 }
 
 .downstream-stats .stats-table,
 .patch-stats .stats-table {
-    width: 100%;
-    margin: 0 auto;
-    border-collapse: collapse;
-    margin-top: 15px;
-    background: white;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+width: 100%;
+margin: 0 auto;
+border-collapse: collapse;
+margin-top: 15px;
+background: white;
+box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 .downstream-stats .stats-table th,
 .patch-stats .stats-table th {
-    text-align: center;
-    padding: 12px;
-    background: #f5f5f5;
-    font-weight: bold;
-    color: #333;
-    font-size: 14px;
-    white-space: nowrap;
-    border: 1px solid #e0e0e0;
+text-align: center;
+padding: 12px;
+background: #f5f5f5;
+font-weight: bold;
+color: #333;
+font-size: 14px;
+white-space: nowrap;
+border: 1px solid #e0e0e0;
 }
 
 .downstream-stats .stats-cell,
 .patch-stats .stats-cell {
-    text-align: center !important;
-    padding: 12px;
-    font-weight: bold;
-    color: #000000;
-    font-size: 14px;
-    border: 1px solid #e0e0e0;
-    height: 43px;
+text-align: center !important;
+padding: 12px;
+font-weight: bold;
+color: #000000;
+font-size: 14px;
+border: 1px solid #e0e0e0;
+height: 43px;
 }
 
 .downstream-stats .stats-cell a,
 .patch-stats .stats-cell a {
-    text-align: center;
-    display: block;
-    width: 100%;
-    color: #1976d2;
+text-align: center;
+display: block;
+width: 100%;
+color: #1976d2;
 }
 
 .downstream-stats .stats-cell.clickable {
@@ -2821,7 +2843,6 @@ transition: background-color 0.2s;
 .downstream-stats .stats-cell.clickable:hover {
 background-color: #f5f5f5;
 }
-
 
 .progress-container {
 margin: 20px 0;
@@ -2841,33 +2862,33 @@ margin-bottom: 10px;
 }
 
 .progress-fill {
-    width: 0%;
-    height: 100%;
-    background: #2196F3;
-    transition: width 0.3s ease;
-    background-image: linear-gradient(
-    45deg,
-    rgba(255, 255, 255, 0.15) 25%,
-    transparent 25%,
-    transparent 50%,
-    rgba(255, 255, 255, 0.15) 50%,
-    rgba(255, 255, 255, 0.15) 75%,
-    transparent 75%,
-    transparent
-    );
-    background-size: 1rem 1rem;
-    animation: progress-bar-stripes 1s linear infinite;
+width: 0%;
+height: 100%;
+background: #2196F3;
+transition: width 0.3s ease;
+background-image: linear-gradient(
+45deg,
+rgba(255, 255, 255, 0.15) 25%,
+transparent 25%,
+transparent 50%,
+rgba(255, 255, 255, 0.15) 50%,
+rgba(255, 255, 255, 0.15) 75%,
+transparent 75%,
+transparent
+);
+background-size: 1rem 1rem;
+animation: progress-bar-stripes 1s linear infinite;
 }
 
 @keyframes progress-bar-stripes {
-    0% { background-position: 1rem 0; }
-    100% { background-position: 0 0; }
+0% { background-position: 1rem 0; }
+100% { background-position: 0 0; }
 }
 
 .progress-text {
-    font-size: 14px;
-    color: #666;
-    margin-bottom: 5px;
+font-size: 14px;
+color: #666;
+margin-bottom: 5px;
 }
 
 .progress-step {
@@ -2876,47 +2897,47 @@ color: #999;
 }
 
 .export-button-container {
-    display: flex;
-    justify-content: center;
-    margin-top: 15px;
+display: flex;
+justify-content: center;
+margin-top: 15px;
 }
 
 .export-button {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 6px 12px;
-    background-color: #1976d2;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-    transition: background-color 0.2s;
+display: flex;
+align-items: center;
+gap: 4px;
+padding: 6px 12px;
+background-color: #1976d2;
+color: white;
+border: none;
+border-radius: 4px;
+cursor: pointer;
+font-size: 12px;
+transition: background-color 0.2s;
 }
 
 .export-button:hover {
-    background-color: #1565c0;
+background-color: #1565c0;
 }
 
 .export-button.copied {
-    background-color: #4caf50;
+background-color: #4caf50;
 }
 
 .export-icon {
-    font-size: 13px;
+font-size: 13px;
 }
 
 .side-stats {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
+display: flex;
+flex-direction: column;
+gap: 20px;
 }
 
 .patch-stats {
-    width: 200px;
-    vertical-align: middle;
-    overflow: hidden;
+width: 200px;
+vertical-align: middle;
+overflow: hidden;
 }
 `);
 
