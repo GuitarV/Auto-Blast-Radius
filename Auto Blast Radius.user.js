@@ -458,7 +458,7 @@
                     "Accept": "application/json",
                     "X-Requested-With": "XMLHttpRequest",
                 },
-                timeout: 40000,
+                timeout: 90000,
                 withCredentials: true,
                 onload: function(response) {
                     // 如果是 AHA 请求
