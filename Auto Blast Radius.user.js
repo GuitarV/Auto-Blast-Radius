@@ -262,7 +262,7 @@
                     updateProgress(50, 'Getting position site...');
                     const site = getPositionSite(EXCEL_DATA);
 
-                    updateProgress(70, 'Fetching position info🤔...');
+                    updateProgress(60, 'Fetching position info (Maybe 1-2 mins🤔)...');
                     positionMap = await fetchPositionInfo(site);
 
                     updateProgress(90, 'Preparing display...');
