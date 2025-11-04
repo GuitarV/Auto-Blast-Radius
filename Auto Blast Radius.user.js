@@ -96,6 +96,56 @@
         // ... 添加更多站点
     ];
 
+    // 通用的事件处理器类
+    class EventHandlers {
+        // 处理复制按钮点击
+        static handleCopyButton(button, text, successDuration = 3000) {
+            if (!button) return;
+
+            button.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    const originalHTML = button.innerHTML;
+                    button.innerHTML = '<span class="export-icon">✓</span> Copied!';
+                    button.classList.add('copied');
+
+                    setTimeout(() => {
+                        button.innerHTML = originalHTML;
+                        button.classList.remove('copied');
+                    }, successDuration);
+                } catch (err) {
+                    console.error('Copy failed:', err);
+                    // 可以添加失败提示
+                    button.innerHTML = '<span class="export-icon">✗</span> Failed';
+                    button.classList.add('failed');
+
+                    setTimeout(() => {
+                        button.innerHTML = originalHTML;
+                        button.classList.remove('failed');
+                    }, successDuration);
+                }
+            });
+        }
+
+        // 处理模态框关闭
+        static handleModalClose(modal, backdrop) {
+            const closeModal = () => {
+                modal.style.display = 'none';
+                backdrop.style.display = 'none';
+            };
+
+            // 背景点击事件
+            backdrop.addEventListener('click', closeModal);
+
+            // ESC键关闭
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && modal.style.display === 'block') {
+                    closeModal();
+                }
+            });
+        }
+    }
+
     // 新的设置界面函数
     function setupInterface() {
         const xwikiContent = document.getElementById('xwikicontent');
@@ -111,29 +161,29 @@
         const siteSection = document.createElement('div');
         siteSection.className = 'site-selection-section';
         siteSection.innerHTML = `
-    <h2>Select Data Center Site</h2>
-    <div class="custom-dropdown">
-        <div class="selected-option" tabindex="0">Select a Site</div>
-        <ul class="dropdown-options">
-            ${AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
-        </ul>
-    </div>
-`;
+            <h2>Select Data Center Site</h2>
+            <div class="custom-dropdown">
+                <div class="selected-option" tabindex="0">Select a Site</div>
+                <ul class="dropdown-options">
+                    ${AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
+                </ul>
+            </div>
+        `;
         container.appendChild(siteSection);
 
         // 添加模态框结构
         const modalHtml = `
-        <div class="modal-backdrop"></div>
-        <div class="position-modal">
-            <div class="modal-header">
-                <div class="modal-title"></div>
-                <div class="modal-close">&times;</div>
+            <div class="modal-backdrop"></div>
+            <div class="position-modal">
+                <div class="modal-header">
+                    <div class="modal-title"></div>
+                    <div class="modal-close">&times;</div>
+                </div>
+                <div class="modal-content">
+                    <div class="position-list"></div>
+                </div>
             </div>
-            <div class="modal-content">
-                <div class="position-list"></div>
-            </div>
-        </div>
-    `;
+        `;
 
         // 创建模态框容器并添加到 container
         const modalContainer = document.createElement('div');
@@ -156,12 +206,12 @@
         const progressContainer = document.createElement('div');
         progressContainer.className = 'progress-container';
         progressContainer.innerHTML = `
-    <div class="progress-bar">
-        <div class="progress-fill"></div>
-    </div>
-    <div class="progress-text">Loading: <span class="progress-percentage">0%</span></div>
-    <div class="progress-step">Initializing...</div>
-`;
+            <div class="progress-bar">
+                <div class="progress-fill"></div>
+            </div>
+            <div class="progress-text">Loading: <span class="progress-percentage">0%</span></div>
+            <div class="progress-step">Initializing...</div>
+        `;
         progressContainer.style.display = 'none';
         container.appendChild(progressContainer);
 
@@ -1959,22 +2009,7 @@
             return;
         }
 
-        function closeModal() {
-            modal.style.display = 'none';
-            backdrop.style.display = 'none';
-        }
-
-        // 确保每次打开modal时都重新绑定关闭事件
-        function setupCloseButton() {
-            const closeBtn = modal.querySelector('.modal-close');
-            if (closeBtn) {
-                closeBtn.replaceWith(closeBtn.cloneNode(true));
-                const newCloseBtn = modal.querySelector('.modal-close');
-                newCloseBtn.addEventListener('click', closeModal);
-            }
-        }
-
-        backdrop.addEventListener('click', closeModal);
+        EventHandlers.handleModalClose(modal, backdrop);
 
         document.querySelectorAll('.stats-cell.clickable').forEach(cell => {
             cell.addEventListener('click', () => {
@@ -2059,18 +2094,11 @@
                     // 添加复制按钮的事件监听器
                     const copyBtn = modal.querySelector('#copyPositionsBtn');
                     if (copyBtn) {
-                        // 移除旧的事件监听器
-                        copyBtn.replaceWith(copyBtn.cloneNode(true));
-                        const newCopyBtn = modal.querySelector('#copyPositionsBtn');
-
-                        newCopyBtn.addEventListener('click', () => {
-                            copyToClipboard(positionsTextWithEuclid, newCopyBtn);
-                        });
+                        EventHandlers.handleCopyButton(copyBtn, positionsTextWithEuclid);
                     }
 
                     modal.style.display = 'block';
                     backdrop.style.display = 'block';
-                    setupCloseButton();
                 } else if (cell.dataset.patchPositions) {
                     // 处理 Patch rack 的点击
                     const positions = JSON.parse(cell.dataset.patchPositions);
@@ -2110,16 +2138,11 @@
                     // 添加复制按钮的事件监听器
                     const copyBtn = modal.querySelector('#copyPositionsBtn');
                     if (copyBtn) {
-                        copyBtn.replaceWith(copyBtn.cloneNode(true));
-                        const newCopyBtn = modal.querySelector('#copyPositionsBtn');
-                        newCopyBtn.addEventListener('click', () => {
-                            copyToClipboard(positionsText, newCopyBtn);
-                        });
+                        EventHandlers.handleCopyButton(copyBtn, positionsText);
                     }
 
                     modal.style.display = 'block';
                     backdrop.style.display = 'block';
-                    setupCloseButton();
                 } else {
                     // 下游机柜单元格处理逻辑
                     const positions = JSON.parse(cell.dataset.positions || '[]');
@@ -2827,7 +2850,7 @@ width: auto;
 
 .modal-header {
 display: flex;
-justify-content: space-between;
+justify-content: center;
 align-items: center;
 margin-bottom: 15px;
 padding-bottom: 10px;
@@ -2874,12 +2897,7 @@ font-size: 13px;
 }
 
 .modal-close {
-cursor: pointer;
-padding: 5px;
-font-size: 1.5em;
-line-height: 1;
-color: #666;
-margin-left: 10px;
+display: none;
 }
 
 .modal-content {
