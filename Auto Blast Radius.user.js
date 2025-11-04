@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.21
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -71,6 +71,7 @@
 
     let EXCEL_DATA = [];
     let positionMap = new Map();
+    window.filteredPositions = {};
     const LAMBDA_URL = 'https://twuukpz75g.execute-api.us-west-2.amazonaws.com/default/GetS3Data';
 
     // 可选的站点列表
@@ -832,17 +833,6 @@
             return;
         }
 
-        // 添加进度更新函数
-        window.updateProgress = (progress) => {
-            const progressContainer = document.querySelector('.progress-container');
-            if (progressContainer) {
-                const progressFill = progressContainer.querySelector('.progress-fill');
-                const progressText = progressContainer.querySelector('.progress-percentage');
-                if (progressFill) progressFill.style.width = `${progress}%`;
-                if (progressText) progressText.textContent = `${progress}%`;
-            }
-        };
-
         let filteredData = EXCEL_DATA;
 
         try {
@@ -1040,6 +1030,45 @@
                 };
             });
 
+            // 创建一个筛选后的positions对象
+            window.filteredPositions = {};
+            const filteredPositionKeys = new Set();
+
+            // 从filteredData中获取受影响的位置
+            filteredData.forEach(row => {
+                const positionKey = `${row['Position Room']}-${row['Position']}`;
+                filteredPositionKeys.add(positionKey);
+                if (!window.filteredPositions[positionKey]) {
+                    window.filteredPositions[positionKey] = {
+                        ...positions[positionKey],
+                        powerChains: [],
+                        affectedPowerChains: []
+                    };
+                }
+                // 添加电力链路信息
+                if (positions[positionKey]) {
+                    const powerChain = {
+                        circuit: {
+                            name: row['Circuit Name'] || 'N/A',
+                            number: row['Circuit Number'] || 'N/A'
+                        },
+                        pdu: {
+                            name: row['PDU Name'] || 'N/A',
+                            type: row['PDU Type'] || 'N/A'
+                        },
+                        upsGroup: row['UPS Group'] || 'N/A',
+                        usb: row['USB'] || 'N/A',
+                        powerFeed: row['Power Feed'] || 'N/A',
+                        routingInfo: row.routingInfo || { transformer: 'N/A', utility: 'N/A' }
+                    };
+                    window.filteredPositions[positionKey].powerChains.push(powerChain);
+
+                    if (affectedCircuits.has(row['Circuit Name'])) {
+                        window.filteredPositions[positionKey].affectedPowerChains.push(powerChain);
+                    }
+                }
+            });
+
             // 计算统计信息
             async function processPositionBatch(entries, stats, expectedPowerByPosition, batchSize = 1000) {
                 stats.patchRacks = {
@@ -1063,8 +1092,7 @@
                     await new Promise(resolve => setTimeout(resolve, 0));
                     const batch = entries.slice(i, i + batchSize);
 
-                    for (const [positionKey, rows] of batch) {
-                        const position = positions[positionKey];
+                    for (const [positionKey, position] of Object.entries(window.filteredPositions)) {
                         const posInfo = positionMap.get(positionKey);
 
                         // 只处理 deployed 状态的位置
@@ -1497,25 +1525,29 @@
             }
             function getPositionsForMetric(positionsObj, type, metric) {
                 const result = [];
-                Object.entries(positionsObj).forEach(([key, position]) => {
-                    if (position.type.toUpperCase() !== type || position.status !== 'deployed') return;
+                Object.entries(window.filteredPositions).forEach(([key, position]) => {
+                    // 获取positionMap中的信息
+                    const posInfo = positionMap.get(key);
+                    if (!posInfo) return;
+
+                    if (posInfo.type?.toUpperCase() !== type || posInfo.status !== 'deployed') return;
 
                     const expected = expectedPowerByPosition[key];
                     if (!expected) return;
 
                     const remainingPrimary = position.powerChains.filter(chain =>
-                                                                         chain.powerFeed.toLowerCase() === 'primary' &&
-                                                                         !position.affectedPowerChains.some(affected =>
-                                                                                                            affected.circuit.name === chain.circuit.name
-                                                                                                           )
-                                                                        ).length;
+                         chain.powerFeed.toLowerCase() === 'primary' &&
+                         !position.affectedPowerChains.some(affected =>
+                                                            affected.circuit.name === chain.circuit.name
+                                                           )
+                        ).length;
 
                     const remainingSecondary = position.powerChains.filter(chain =>
-                                                                           chain.powerFeed.toLowerCase() === 'secondary' &&
-                                                                           !position.affectedPowerChains.some(affected =>
-                                                                                                              affected.circuit.name === chain.circuit.name
-                                                                                                             )
-                                                                          ).length;
+                       chain.powerFeed.toLowerCase() === 'secondary' &&
+                       !position.affectedPowerChains.some(affected =>
+                                                          affected.circuit.name === chain.circuit.name
+                                                         )
+                      ).length;
 
                     const hasDualPower = expected.primary > 0 && expected.secondary > 0;
 
@@ -1618,57 +1650,38 @@
         }
     }
 
-// 添加导出功能的实现
-function generateStatsMarkdown(positions, activeRackTypes, stats) {
-    let markdown = `| Power Status | ${activeRackTypes.join(' | ')} | Total |\n`;
-    markdown += `|${'-'.repeat(13)}|${activeRackTypes.map(() => '-'.repeat(10)).join('|')}|${'-'.repeat(10)}|\n`;
+    // 添加导出功能的实现
+    function generateStatsMarkdown(positions, activeRackTypes, stats) {
+        let markdown = `| Power Status | ${activeRackTypes.join(' | ')} | Total |\n`;
+        markdown += `|${'-'.repeat(13)}|${activeRackTypes.map(() => '-'.repeat(10)).join('|')}|${'-'.repeat(10)}|\n`;
 
-    ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss'].forEach(metric => {
-        const rowValues = activeRackTypes.map(type => {
-            const value = stats.detailedStats[type][metric] || 0;
-            const euclidCount = stats.detailedStats[type].euclidCount?.[metric] || 0;
-            return euclidCount > 0 ? `${value} (${euclidCount})` : value;
+        ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss'].forEach(metric => {
+            const rowValues = activeRackTypes.map(type => {
+                const value = stats.detailedStats[type][metric] || 0;
+                const euclidCount = stats.detailedStats[type].euclidCount?.[metric] || 0;
+                return euclidCount > 0 ? `${value} (${euclidCount})` : value;
+            });
+            const rowTotal = activeRackTypes.reduce((sum, type) =>
+                                                    sum + (stats.detailedStats[type][metric] || 0), 0);
+            markdown += `| ${metric} | ${rowValues.join(' | ')} | ${rowTotal} |\n`;
         });
-        const rowTotal = activeRackTypes.reduce((sum, type) =>
-                                                sum + (stats.detailedStats[type][metric] || 0), 0);
-        markdown += `| ${metric} | ${rowValues.join(' | ')} | ${rowTotal} |\n`;
-    });
 
-    const totals = activeRackTypes.map(type =>
-                                       ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss']
-                                       .reduce((sum, metric) => sum + (stats.detailedStats[type][metric] || 0), 0)
-                                      );
-    const finalTotal = totals.reduce((sum, val) => sum + val, 0);
-    markdown += `| **Total** | ${totals.join(' | ')} | ${finalTotal} |\n`;
+        const totals = activeRackTypes.map(type =>
+                                           ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss']
+                                           .reduce((sum, metric) => sum + (stats.detailedStats[type][metric] || 0), 0)
+                                          );
+        const finalTotal = totals.reduce((sum, val) => sum + val, 0);
+        markdown += `| **Total** | ${totals.join(' | ')} | ${finalTotal} |\n`;
 
-    return markdown;
-}
+        return markdown;
+    }
 
 
-// 添加复制到剪贴板的功能
-async function copyToClipboard(text, button = null) {
-    try {
-        await navigator.clipboard.writeText(text);
-        // 如果提供了按钮元素，显示视觉反馈
-        if (button) {
-            const originalText = button.innerHTML;
-            button.innerHTML = '<span class="export-icon">✓</span> Copied!';
-            button.classList.add('copied');
-
-            setTimeout(() => {
-                button.innerHTML = '<span class="export-icon">📋</span> Copy';
-                button.classList.remove('copied');
-            }, 3000);
-        }
-    } catch (err) {
-        console.error('Failed to copy text:', err);
-        // 回退方法
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        document.body.appendChild(textarea);
-        textarea.select();
+    // 添加复制到剪贴板的功能
+    async function copyToClipboard(text, button = null) {
         try {
-            document.execCommand('copy');
+            await navigator.clipboard.writeText(text);
+            // 如果提供了按钮元素，显示视觉反馈
             if (button) {
                 const originalText = button.innerHTML;
                 button.innerHTML = '<span class="export-icon">✓</span> Copied!';
@@ -1680,306 +1693,324 @@ async function copyToClipboard(text, button = null) {
                 }, 3000);
             }
         } catch (err) {
-            console.error('Fallback copy failed:', err);
-            alert('Failed to copy to clipboard');
-        }
-        document.body.removeChild(textarea);
-    }
-}
+            console.error('Failed to copy text:', err);
+            // 回退方法
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                if (button) {
+                    const originalText = button.innerHTML;
+                    button.innerHTML = '<span class="export-icon">✓</span> Copied!';
+                    button.classList.add('copied');
 
-// 初始化函数
-async function init() {
-    const maxRetries = 3;
-    let retryCount = 0;
-
-    while (retryCount < maxRetries) {
-        try {
-            await loadExternalResources();
-
-            // 验证依赖项是否正确加载
-            if (!window.jQuery || !window.jQuery.fn.select2) {
-                throw new Error('Required dependencies not loaded');
+                    setTimeout(() => {
+                        button.innerHTML = '<span class="export-icon">📋</span> Copy';
+                        button.classList.remove('copied');
+                    }, 3000);
+                }
+            } catch (err) {
+                console.error('Fallback copy failed:', err);
+                alert('Failed to copy to clipboard');
             }
-
-            const container = setupInterface();
-            document.getElementById('xwikicontent').appendChild(container);
-
-            const loadingIndicator = container.querySelector('.loading-indicator');
-            if (loadingIndicator) {
-                loadingIndicator.style.display = 'none';
-            }
-
-            break; // 成功后退出循环
-        } catch (error) {
-            retryCount++;
-            console.warn(`Initialization attempt ${retryCount} failed:`, error);
-
-            if (retryCount === maxRetries) {
-                console.error('Failed to initialize after multiple attempts:', error);
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'error-message';
-                errorDiv.textContent = `Failed to initialize after ${maxRetries} attempts: ${error.message}`;
-                document.getElementById('xwikicontent').appendChild(errorDiv);
-            } else {
-                // 等待一段时间后重试
-                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-            }
+            document.body.removeChild(textarea);
         }
     }
-}
 
+    // 初始化函数
+    async function init() {
+        const maxRetries = 3;
+        let retryCount = 0;
 
-// 获取 Position Site 函数
-function getPositionSite(data) {
-    if (!Array.isArray(data) || data.length === 0) {
-        throw new Error('Invalid data: Empty or not an array');
+        while (retryCount < maxRetries) {
+            try {
+                await loadExternalResources();
+
+                // 验证依赖项是否正确加载
+                if (!window.jQuery || !window.jQuery.fn.select2) {
+                    throw new Error('Required dependencies not loaded');
+                }
+
+                const container = setupInterface();
+                document.getElementById('xwikicontent').appendChild(container);
+
+                const loadingIndicator = container.querySelector('.loading-indicator');
+                if (loadingIndicator) {
+                    loadingIndicator.style.display = 'none';
+                }
+
+                break; // 成功后退出循环
+            } catch (error) {
+                retryCount++;
+                console.warn(`Initialization attempt ${retryCount} failed:`, error);
+
+                if (retryCount === maxRetries) {
+                    console.error('Failed to initialize after multiple attempts:', error);
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'error-message';
+                    errorDiv.textContent = `Failed to initialize after ${maxRetries} attempts: ${error.message}`;
+                    document.getElementById('xwikicontent').appendChild(errorDiv);
+                } else {
+                    // 等待一段时间后重试
+                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+                }
+            }
+        }
     }
 
-    const positionSite = data[0]['Position Site'];
-    if (!positionSite) {
-        throw new Error('Position Site not found in data');
+
+    // 获取 Position Site 函数
+    function getPositionSite(data) {
+        if (!Array.isArray(data) || data.length === 0) {
+            throw new Error('Invalid data: Empty or not an array');
+        }
+
+        const positionSite = data[0]['Position Site'];
+        if (!positionSite) {
+            throw new Error('Position Site not found in data');
+        }
+
+        return positionSite;
     }
 
-    return positionSite;
-}
+    // 初始化筛选器
+    function initializeFilters(filtersContainer, stats) {
+        if (typeof jQuery === 'undefined') {
+            throw new Error('jQuery is not loaded');
+        }
+        if (typeof jQuery.fn.select2 === 'undefined') {
+            throw new Error('Select2 is not loaded');
+        }
 
-// 初始化筛选器
-function initializeFilters(filtersContainer, stats) {
-    if (typeof jQuery === 'undefined') {
-        throw new Error('jQuery is not loaded');
-    }
-    if (typeof jQuery.fn.select2 === 'undefined') {
-        throw new Error('Select2 is not loaded');
-    }
+        filtersContainer.innerHTML = '';
 
-    filtersContainer.innerHTML = '';
+        const filters = getFilterOptions();
+        filters.forEach(filter => {
+            const filterSection = document.createElement('div');
+            filterSection.className = 'filter-section';
 
-    const filters = getFilterOptions();
-    filters.forEach(filter => {
-        const filterSection = document.createElement('div');
-        filterSection.className = 'filter-section';
+            const label = document.createElement('label');
+            label.textContent = filter.label;
 
-        const label = document.createElement('label');
-        label.textContent = filter.label;
-
-        const select = $('<select>', {
-            class: 'filter-select',
-            multiple: true,
-            'data-column': filter.column,
-            'data-is-position': filter.isPosition
-        });
-
-        // 根据不同的列类型添加选项
-        if (filter.column === 'Position Room') {
-            // 从 positionMap 获取所有房间
-            const rooms = [...new Set(
-                Array.from(positionMap.values()).map(info => info.room_name)
-            )].filter(Boolean);
-            rooms.sort().forEach(room => {
-                select.append(new Option(room, room));
+            const select = $('<select>', {
+                class: 'filter-select',
+                multiple: true,
+                'data-column': filter.column,
+                'data-is-position': filter.isPosition
             });
-        } else if (filter.column === 'Position') {
-            // 从 positionMap 获取所有位置
-            const positions = [...new Set(
-                Array.from(positionMap.values()).map(info => info.name)
-            )].filter(Boolean);
-            positions.sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
-                .forEach(position => {
-                select.append(new Option(position, position));
-            });
-        } else if (filter.column === 'type' && stats) {
-            const activeRackTypes = Object.keys(stats.detailedStats)
-            .filter(type => {
-                return stats.detailedStats[type]['Total'] > 0 ||
-                    (type === 'PATCH' && stats.patchRacks && stats.patchRacks.total > 0);
-            })
-            .sort();
-            select.empty();
-            if (activeRackTypes.length > 0) {
-                activeRackTypes.forEach(type => {
-                    const option = new Option(type, type);
-                    select.append(option);
+
+            // 根据不同的列类型添加选项
+            if (filter.column === 'Position Room') {
+                // 从 positionMap 获取所有房间
+                const rooms = [...new Set(
+                    Array.from(positionMap.values()).map(info => info.room_name)
+                )].filter(Boolean);
+                rooms.sort().forEach(room => {
+                    select.append(new Option(room, room));
+                });
+            } else if (filter.column === 'Position') {
+                // 从 positionMap 获取所有位置
+                const positions = [...new Set(
+                    Array.from(positionMap.values()).map(info => info.name)
+                )].filter(Boolean);
+                positions.sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
+                    .forEach(position => {
+                    select.append(new Option(position, position));
+                });
+            } else if (filter.column === 'type' && stats) {
+                const activeRackTypes = Object.keys(stats.detailedStats)
+                .filter(type => {
+                    return stats.detailedStats[type]['Total'] > 0 ||
+                        (type === 'PATCH' && stats.patchRacks && stats.patchRacks.total > 0);
+                })
+                .sort();
+                select.empty();
+                if (activeRackTypes.length > 0) {
+                    activeRackTypes.forEach(type => {
+                        const option = new Option(type, type);
+                        select.append(option);
+                    });
+                } else {
+                    select.append(new Option('No Types Available', ''));
+                }
+            } else if (filter.column === 'status') {
+                ['deployed', 'undeployed', 'disabled'].forEach(status => {
+                    select.append(new Option(
+                        status.charAt(0).toUpperCase() + status.slice(1),
+                        status
+                    ));
                 });
             } else {
-                select.append(new Option('No Types Available', ''));
-            }
-        } else if (filter.column === 'status') {
-            ['deployed', 'undeployed', 'disabled'].forEach(status => {
-                select.append(new Option(
-                    status.charAt(0).toUpperCase() + status.slice(1),
-                    status
-                ));
-            });
-        } else {
-            // 只为有电力数据的位置添加电力相关的选项
-            const options = [...new Set(EXCEL_DATA
-                                        .map(item => {
-                if (filter.column.startsWith('routingInfo.')) {
-                    const field = filter.column.split('.')[1];
-                    return item.routingInfo?.[field];
-                }
-                return item[filter.column];
-            })
-                                        .filter(Boolean)
-                                       )].sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
-
-            options.forEach(option => {
-                select.append(new Option(option, option));
-            });
-        }
-
-        filterSection.appendChild(label);
-        $(filterSection).append(select);
-
-        // Select2 初始化
-        select.select2({
-            placeholder: `Select ${filter.label}`,
-            allowClear: true,
-            closeOnSelect: false,
-            width: '100%',
-            selectOnClose: false,
-            minimumResultsForSearch: 10,
-            dropdownAutoWidth: true,
-            dropdownParent: filterSection,
-            templateSelection: function(data, container) {
-                const selected = select.val();
-                if (selected && selected.length > 1) {
-                    if ($(container).is(':first-child')) {
-                        return `${selected.length} items selected`;
+                // 只为有电力数据的位置添加电力相关的选项
+                const options = [...new Set(EXCEL_DATA
+                                            .map(item => {
+                    if (filter.column.startsWith('routingInfo.')) {
+                        const field = filter.column.split('.')[1];
+                        return item.routingInfo?.[field];
                     }
-                    return '';
-                }
-                return data.text;
+                    return item[filter.column];
+                })
+                                            .filter(Boolean)
+                                           )].sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
+
+                options.forEach(option => {
+                    select.append(new Option(option, option));
+                });
             }
+
+            filterSection.appendChild(label);
+            $(filterSection).append(select);
+
+            // Select2 初始化
+            select.select2({
+                placeholder: `Select ${filter.label}`,
+                allowClear: true,
+                closeOnSelect: false,
+                width: '100%',
+                selectOnClose: false,
+                minimumResultsForSearch: 10,
+                dropdownAutoWidth: true,
+                dropdownParent: filterSection,
+                templateSelection: function(data, container) {
+                    const selected = select.val();
+                    if (selected && selected.length > 1) {
+                        if ($(container).is(':first-child')) {
+                            return `${selected.length} items selected`;
+                        }
+                        return '';
+                    }
+                    return data.text;
+                }
+            });
+
+            filtersContainer.appendChild(filterSection);
         });
 
-        filtersContainer.appendChild(filterSection);
-    });
-
-    // 修改筛选逻辑
-    const activeFilters = {};
-    function debounce(fn, delay) {
-        let timer;
-        return function(...args) {
-            clearTimeout(timer);
-            timer = setTimeout(() => fn.apply(this, args), delay);
+        // 修改筛选逻辑
+        const activeFilters = {};
+        function debounce(fn, delay) {
+            let timer;
+            return function(...args) {
+                clearTimeout(timer);
+                timer = setTimeout(() => fn.apply(this, args), delay);
+            }
         }
+        // 创建防抖版本的updateDisplay
+        const debouncedUpdateDisplay = debounce((filters) => {
+            updateDisplay(filters);
+        }, 300);
+
+        // 修改事件处理
+        $('.filter-select').on('change', function() {
+            const column = $(this).data('column');
+            const values = $(this).val() || [];
+
+            if (values.length > 0) {
+                activeFilters[column] = values.map(value => String(value).trim());
+            } else {
+                delete activeFilters[column];
+            }
+
+            debouncedUpdateDisplay(activeFilters);
+        });
+        return activeFilters;
     }
-    // 创建防抖版本的updateDisplay
-    const debouncedUpdateDisplay = debounce((filters) => {
-        updateDisplay(filters);
-    }, 300);
 
-    // 修改事件处理
-    $('.filter-select').on('change', function() {
-        const column = $(this).data('column');
-        const values = $(this).val() || [];
-
-        if (values.length > 0) {
-            activeFilters[column] = values.map(value => String(value).trim());
-        } else {
-            delete activeFilters[column];
+    //添加统计表格弹窗生成
+    function generateStatsCell(type, metric, displayValue, positions) {
+        // 如果值为0或是total行，保持原有逻辑
+        if (displayValue === 0 || metric === 'Total') {
+            return `<td class="stats-cell">${displayValue}</td>`;
         }
 
-        debouncedUpdateDisplay(activeFilters);
-    });
-    return activeFilters;
-}
+        // 计算筛选后的Euclid数量
+        const euclidCount = positions.filter(position => {
+            const matchingKey = Object.keys(window.filteredPositions).find(key => {
+                const pos = window.filteredPositions[key];
+                return pos.position === position &&
+                       positionMap.get(key)?.type?.toUpperCase() === type;
+            });
+            if (!matchingKey) return false;
+            const posInfo = positionMap.get(matchingKey);
+            return posInfo?.is_brick === true;
+        }).length;
 
-//添加统计表格弹窗生成
-function generateStatsCell(type, metric, displayValue, positions) {
-    // 如果值为0，直接返回不可点击的单元格
-    if (displayValue === 0) return `<td class="stats-cell">0</td>`;
+        const displayText = euclidCount > 0 ? `${displayValue} (${euclidCount})` : displayValue;
 
-    // 检查是否是 total 行
-    if (metric === 'Total') {
-        return `<td class="stats-cell">${displayValue}</td>`;
+        return `
+        <td class="stats-cell clickable"
+            data-type="${type}"
+            data-metric="${metric}"
+            data-positions='${JSON.stringify(positions)}'>
+            ${displayText}
+        </td>
+        `;
     }
 
-    // 计算 Euclid 数量
-    const euclidCount = positions.filter(position => {
-        const matchingKey = Object.entries(window.positions).find(([key, pos]) => {
-            return pos.position === position && pos.type.toUpperCase() === type;
-        })?.[0];
-        if (!matchingKey) return false;
-        const posInfo = positionMap.get(matchingKey);
-        return posInfo?.is_brick === true;  // 直接检查 is_brick
-    }).length;
 
-    // 生成显示文本
-    const displayText = euclidCount > 0 ? `${displayValue} (${euclidCount})` : displayValue;
+    function setupModalEvents() {
+        const modal = document.querySelector('.position-modal');
+        const backdrop = document.querySelector('.modal-backdrop');
 
-    return `
-    <td class="stats-cell clickable"
-        data-type="${type}"
-        data-metric="${metric}"
-        data-positions='${JSON.stringify(positions)}'>
-        ${displayText}
-    </td>
-`;
-}
-
-function setupModalEvents() {
-    const modal = document.querySelector('.position-modal');
-    const backdrop = document.querySelector('.modal-backdrop');
-
-    if (!modal || !backdrop) {
-        console.error('Modal elements not found');
-        return;
-    }
-
-    function closeModal() {
-        modal.style.display = 'none';
-        backdrop.style.display = 'none';
-    }
-
-    // 确保每次打开modal时都重新绑定关闭事件
-    function setupCloseButton() {
-        const closeBtn = modal.querySelector('.modal-close');
-        if (closeBtn) {
-            closeBtn.replaceWith(closeBtn.cloneNode(true));
-            const newCloseBtn = modal.querySelector('.modal-close');
-            newCloseBtn.addEventListener('click', closeModal);
+        if (!modal || !backdrop) {
+            console.error('Modal elements not found');
+            return;
         }
-    }
 
-    backdrop.addEventListener('click', closeModal);
+        function closeModal() {
+            modal.style.display = 'none';
+            backdrop.style.display = 'none';
+        }
 
-    document.querySelectorAll('.stats-cell.clickable').forEach(cell => {
-        cell.addEventListener('click', () => {
-            try {
-                // 判断是主表格的单元格还是下游机柜的单元格
-                if (cell.dataset.type && cell.dataset.metric) {
-                    const type = cell.dataset.type;
-                    const metric = cell.dataset.metric;
-                    const positions = JSON.parse(cell.dataset.positions);
+        // 确保每次打开modal时都重新绑定关闭事件
+        function setupCloseButton() {
+            const closeBtn = modal.querySelector('.modal-close');
+            if (closeBtn) {
+                closeBtn.replaceWith(closeBtn.cloneNode(true));
+                const newCloseBtn = modal.querySelector('.modal-close');
+                newCloseBtn.addEventListener('click', closeModal);
+            }
+        }
 
-                    // 获取这些位置中的 Euclid positions
-                    const euclidPositions = positions.filter(position => {
-                        const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
-                            return pos.position === position && pos.type.toUpperCase() === type;
+        backdrop.addEventListener('click', closeModal);
+
+        document.querySelectorAll('.stats-cell.clickable').forEach(cell => {
+            cell.addEventListener('click', () => {
+                try {
+                    // 判断是主表格的单元格还是下游机柜的单元格
+                    if (cell.dataset.type && cell.dataset.metric) {
+                        const type = cell.dataset.type;
+                        const metric = cell.dataset.metric;
+                        const positions = JSON.parse(cell.dataset.positions);
+
+                        // 获取这些位置中的 Euclid positions
+                        const euclidPositions = positions.filter(position => {
+                            const matchingPosition = Object.entries(window.filteredPositions).find(([key, pos]) => {
+                                return pos.position === position && pos.type.toUpperCase() === type;
+                            });
+                            if (!matchingPosition) return false;
+                            const [positionKey] = matchingPosition;
+                            const posInfo = positionMap.get(positionKey);
+                            return posInfo?.is_brick === true;
                         });
-                        if (!matchingPosition) return false;
-                        const [positionKey] = matchingPosition;
-                        const posInfo = positionMap.get(positionKey);
-                        return posInfo?.is_brick === true;
-                    });
 
-                    // 生成包含 Euclid 标识的位置文本
-                    const positionsTextWithEuclid = positions
-                    .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
-                    .map(position => {
-                        const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
-                            return pos.position === position && pos.type.toUpperCase() === type;
-                        });
-                        if (!matchingPosition) return position;
-                        const [positionKey] = matchingPosition;
-                        const posInfo = positionMap.get(positionKey);
-                        return posInfo?.is_brick ? `${position}(Euclid)` : position;
-                    })
-                    .join('\n');
+                        // 生成包含 Euclid 标识的位置文本
+                        const positionsTextWithEuclid = positions
+                        .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
+                        .map(position => {
+                            const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
+                                return pos.position === position && pos.type.toUpperCase() === type;
+                            });
+                            if (!matchingPosition) return position;
+                            const [positionKey] = matchingPosition;
+                            const posInfo = positionMap.get(positionKey);
+                            return posInfo?.is_brick ? `${position}(Euclid)` : position;
+                        })
+                        .join('\n');
 
-                    modal.querySelector('.modal-header').innerHTML = `
+                        modal.querySelector('.modal-header').innerHTML = `
                 <div class="modal-title">${type} - ${metric} (${positions.length} positions${
                     euclidPositions.length > 0 ? `, ${euclidPositions.length} Euclid` : ''
                 })</div>
@@ -2123,7 +2154,7 @@ function setupModalEvents() {
     });
 }
 
-GM_addStyle(`
+    GM_addStyle(`
 
 .site-selection-section {
 padding: 20px;
