@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.21
+// @version      1.22
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -397,12 +397,15 @@
                     try {
                         if (response.status === 200) {
                             const responseData = JSON.parse(response.responseText);
+
                             const primaryData = responseData.body ?
                                   JSON.parse(responseData.body).primary_data :
                             responseData.primary_data;
+
                             const secondaryData = responseData.body ?
                                   JSON.parse(responseData.body).secondary_data :
                             responseData.secondary_data;
+
                             if (!primaryData || (Array.isArray(primaryData) && primaryData.length === 0)) {
                                 reject(new Error(`No primary data available for site ${site}`));
                                 return;
@@ -899,8 +902,11 @@
 
             // 先获取每个位置应有的总电源数量（从原始数据）
             const expectedPowerByPosition = {};
+
             EXCEL_DATA.forEach(row => {
                 const positionKey = `${row['Position Room']}-${row['Position']}`;
+                const circuitKey = `${positionKey}-${row['Circuit Name']}`;
+
                 if (!expectedPowerByPosition[positionKey]) {
                     expectedPowerByPosition[positionKey] = {
                         primary: 0,
@@ -908,6 +914,7 @@
                         allCircuits: []
                     };
                 }
+
                 if (row['Power Feed'].toLowerCase() === 'primary') {
                     expectedPowerByPosition[positionKey].primary++;
                 } else if (row['Power Feed'].toLowerCase() === 'secondary') {
@@ -1082,12 +1089,12 @@
 
             // 创建一个筛选后的positions对象
             window.filteredPositions = {};
-            const filteredPositionKeys = new Set();
 
             // 从filteredData中获取受影响的位置
             filteredData.forEach(row => {
                 const positionKey = `${row['Position Room']}-${row['Position']}`;
-                filteredPositionKeys.add(positionKey);
+                const circuitKey = `${positionKey}-${row['Circuit Name']}`;
+
                 if (!window.filteredPositions[positionKey]) {
                     window.filteredPositions[positionKey] = {
                         ...positions[positionKey],
@@ -1121,6 +1128,9 @@
 
             // 计算统计信息
             async function processPositionBatch(entries, stats, expectedPowerByPosition, batchSize = 1000) {
+                // 添加处理记录集合
+                const processedPositions = new Set();
+
                 stats.patchRacks = {
                     total: 0,
                     positions: []
@@ -1143,12 +1153,19 @@
                     const batch = entries.slice(i, i + batchSize);
 
                     for (const [positionKey, position] of Object.entries(window.filteredPositions)) {
+                        // 如果已经处理过这个位置，就跳过
+                        if (processedPositions.has(positionKey)) {
+                            continue;
+                        }
+                        processedPositions.add(positionKey);
+
                         const posInfo = positionMap.get(positionKey);
 
                         // 只处理 deployed 状态的位置
                         if (posInfo?.status === 'deployed' && posInfo?.type?.toUpperCase() !== 'PATCH') {
                             const type = (posInfo.type || 'unknown').toUpperCase();
                             const isEuclid = posInfo?.is_brick === true;
+
 
                             // 确保类型存在于统计中并初始化 euclidCount
                             if (!stats.detailedStats[type]) {
@@ -1191,6 +1208,7 @@
 
                             // 对于有 power chain 数据的位置，使用原有的统计逻辑
                             const expected = expectedPowerByPosition[positionKey];
+
                             if (!expected) continue;
 
                             const remainingPrimary = position.powerChains.filter(chain =>
@@ -1586,18 +1604,18 @@
                     if (!expected) return;
 
                     const remainingPrimary = position.powerChains.filter(chain =>
-                         chain.powerFeed.toLowerCase() === 'primary' &&
-                         !position.affectedPowerChains.some(affected =>
-                                                            affected.circuit.name === chain.circuit.name
-                                                           )
-                        ).length;
+                                                                         chain.powerFeed.toLowerCase() === 'primary' &&
+                                                                         !position.affectedPowerChains.some(affected =>
+                                                                                                            affected.circuit.name === chain.circuit.name
+                                                                                                           )
+                                                                        ).length;
 
                     const remainingSecondary = position.powerChains.filter(chain =>
-                       chain.powerFeed.toLowerCase() === 'secondary' &&
-                       !position.affectedPowerChains.some(affected =>
-                                                          affected.circuit.name === chain.circuit.name
-                                                         )
-                      ).length;
+                                                                           chain.powerFeed.toLowerCase() === 'secondary' &&
+                                                                           !position.affectedPowerChains.some(affected =>
+                                                                                                              affected.circuit.name === chain.circuit.name
+                                                                                                             )
+                                                                          ).length;
 
                     const hasDualPower = expected.primary > 0 && expected.secondary > 0;
 
@@ -1980,7 +1998,7 @@
             const matchingKey = Object.keys(window.filteredPositions).find(key => {
                 const pos = window.filteredPositions[key];
                 return pos.position === position &&
-                       positionMap.get(key)?.type?.toUpperCase() === type;
+                    positionMap.get(key)?.type?.toUpperCase() === type;
             });
             if (!matchingKey) return false;
             const posInfo = positionMap.get(matchingKey);
@@ -2078,18 +2096,18 @@
                             ${isEuclid ? `
                                 <span class="euclid-indicator">
                                     ${deployedAssetId ?
-                            `<a href="https://aha.bjs.aws-border.cn/host-monitoring/euclid/${deployedAssetId}"
+                                `<a href="https://aha.bjs.aws-border.cn/host-monitoring/euclid/${deployedAssetId}"
                                             target="_blank"
                                             class="euclid-link">Euclid</a>` :
-                        'Euclid'
-                    }
+                            'Euclid'
+                        }
                                 </span>
                             ` : ''}
                         </div>
                     `;
-                    })
-                        .filter(html => html)
-                        .join('');
+                        })
+                            .filter(html => html)
+                            .join('');
 
                     // 添加复制按钮的事件监听器
                     const copyBtn = modal.querySelector('#copyPositionsBtn');
@@ -2123,42 +2141,42 @@
                     </div>
                 `;
 
-                    modal.querySelector('.position-list').innerHTML = positions
-                        .sort((a, b) => {
-                        const aCompare = `${a.room} ${a.position}`;
-                        const bCompare = `${b.room} ${b.position}`;
-                        return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
-                    })
-                        .map(position => `
+                        modal.querySelector('.position-list').innerHTML = positions
+                            .sort((a, b) => {
+                            const aCompare = `${a.room} ${a.position}`;
+                            const bCompare = `${b.room} ${b.position}`;
+                            return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
+                        })
+                            .map(position => `
                         <div class="position-item">
                             <span class="position-name">${position.room} ${position.position}</span>
                         </div>
                     `).join('');
 
-                    // 添加复制按钮的事件监听器
-                    const copyBtn = modal.querySelector('#copyPositionsBtn');
-                    if (copyBtn) {
-                        EventHandlers.handleCopyButton(copyBtn, positionsText);
-                    }
+                        // 添加复制按钮的事件监听器
+                        const copyBtn = modal.querySelector('#copyPositionsBtn');
+                        if (copyBtn) {
+                            EventHandlers.handleCopyButton(copyBtn, positionsText);
+                        }
 
-                    modal.style.display = 'block';
-                    backdrop.style.display = 'block';
-                } else {
-                    // 下游机柜单元格处理逻辑
-                    const positions = JSON.parse(cell.dataset.positions || '[]');
+                        modal.style.display = 'block';
+                        backdrop.style.display = 'block';
+                    } else {
+                        // 下游机柜单元格处理逻辑
+                        const positions = JSON.parse(cell.dataset.positions || '[]');
 
-                    if (!positions.length) {
-                        console.log('No downstream positions found');
-                        return;
-                    }
+                        if (!positions.length) {
+                            console.log('No downstream positions found');
+                            return;
+                        }
 
-                    modal.querySelector('.modal-title').textContent =
-                        `Network-connected racks (${positions.length} positions)`;
+                        modal.querySelector('.modal-title').textContent =
+                            `Network-connected racks (${positions.length} positions)`;
 
-                    modal.querySelector('.position-list').innerHTML = positions
-                        .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
-                        .map(position => {
-                        return `
+                        modal.querySelector('.position-list').innerHTML = positions
+                            .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
+                            .map(position => {
+                            return `
                             <div class="position-item">
                                 <span class="position-name">${position.position}</span>
                             </div>
