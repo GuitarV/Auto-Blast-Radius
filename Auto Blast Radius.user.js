@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.22
+// @version      1.23
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -888,6 +888,8 @@
 
         let filteredData = EXCEL_DATA;
 
+        const allCircuits = new Set(EXCEL_DATA.map(row => row['Circuit Name']));
+
         try {
             const stats = {
                 total: 0,
@@ -955,8 +957,12 @@
 
             // 创建受影响的circuit集合
             const affectedCircuits = new Set(
-                filteredData.map(row => row['Circuit Name'])
+                // 如果没有筛选条件，则所有电路都标记为受影响
+                Object.keys(filters).length === 0 ?
+                EXCEL_DATA.map(row => row['Circuit Name']) :  // 没有筛选条件时，所有电路都受影响
+                filteredData.map(row => row['Circuit Name'])   // 有筛选条件时，筛选出的电路受影响
             );
+
 
             // 创建要显示的位置集合
             const positionsToShow = new Set();
@@ -1090,45 +1096,42 @@
             // 创建一个筛选后的positions对象
             window.filteredPositions = {};
 
-            // 从filteredData中获取受影响的位置
+            // 首先获取所有需要处理的位置
+            const affectedPositionKeys = new Set(filteredData.map(row =>
+                                                                  `${row['Position Room']}-${row['Position']}`
+                                                                 ));
+
+            // 初始化这些位置的数据，复制所有原始电路
+            affectedPositionKeys.forEach(positionKey => {
+                if (positions[positionKey]) {
+                    window.filteredPositions[positionKey] = {
+                        ...positions[positionKey],
+                        powerChains: [...positions[positionKey].powerChains],  // 复制所有原始电路
+                        affectedPowerChains: []  // 清空受影响电路列表
+                    };
+                }
+            });
+
+            // 从filteredData中标记受影响的电路
             filteredData.forEach(row => {
                 const positionKey = `${row['Position Room']}-${row['Position']}`;
                 const circuitKey = `${positionKey}-${row['Circuit Name']}`;
 
-                if (!window.filteredPositions[positionKey]) {
-                    window.filteredPositions[positionKey] = {
-                        ...positions[positionKey],
-                        powerChains: [],
-                        affectedPowerChains: []
-                    };
-                }
-                // 添加电力链路信息
-                if (positions[positionKey]) {
-                    const powerChain = {
-                        circuit: {
-                            name: row['Circuit Name'] || 'N/A',
-                            number: row['Circuit Number'] || 'N/A'
-                        },
-                        pdu: {
-                            name: row['PDU Name'] || 'N/A',
-                            type: row['PDU Type'] || 'N/A'
-                        },
-                        upsGroup: row['UPS Group'] || 'N/A',
-                        usb: row['USB'] || 'N/A',
-                        powerFeed: row['Power Feed'] || 'N/A',
-                        routingInfo: row.routingInfo || { transformer: 'N/A', utility: 'N/A' }
-                    };
-                    window.filteredPositions[positionKey].powerChains.push(powerChain);
+                if (window.filteredPositions[positionKey] && affectedCircuits.has(row['Circuit Name'])) {
+                    // 找到对应的电路
+                    const affectedChain = window.filteredPositions[positionKey].powerChains.find(
+                        chain => chain.circuit.name === row['Circuit Name']
+                    );
 
-                    if (affectedCircuits.has(row['Circuit Name'])) {
-                        window.filteredPositions[positionKey].affectedPowerChains.push(powerChain);
+                    // 如果找到了这个电路，将它添加到受影响列表中
+                    if (affectedChain) {
+                        window.filteredPositions[positionKey].affectedPowerChains.push(affectedChain);
                     }
                 }
             });
 
             // 计算统计信息
             async function processPositionBatch(entries, stats, expectedPowerByPosition, batchSize = 1000) {
-                // 添加处理记录集合
                 const processedPositions = new Set();
 
                 stats.patchRacks = {
@@ -1164,6 +1167,7 @@
                         // 只处理 deployed 状态的位置
                         if (posInfo?.status === 'deployed' && posInfo?.type?.toUpperCase() !== 'PATCH') {
                             const type = (posInfo.type || 'unknown').toUpperCase();
+                            const redundancy = posInfo.power_redundancy;
                             const isEuclid = posInfo?.is_brick === true;
 
 
@@ -1225,59 +1229,49 @@
                                                                                                                      )
                                                                                   ).length;
 
-                            const hasDualPower = expected.primary > 0 && expected.seconcondary > 0;
-
-                            if (type === 'NETWORK') {
+                            const hasDualPower = expected.primary > 0 && expected.secondary > 0;
+                            if (redundancy === '2N' || redundancy === 'N+C') {
                                 if (!hasDualPower) {
                                     // 单电源 NETWORK 机柜的处理
                                     if (remainingPrimary === 0 && expected.primary > 0) {
                                         stats.detailedStats[type]['Complete Power Loss']++;
-                                        if (isEuclid) {
-                                            stats.detailedStats[type].euclidCount['Complete Power Loss']++;
-                                        }
                                     } else if (remainingPrimary < expected.primary) {
                                         stats.detailedStats[type]['Lost Primary']++;
-                                        if (isEuclid) {
-                                            stats.detailedStats[type].euclidCount['Lost Primary']++;
-                                        }
                                     }
                                 } else {
-                                    // 双电源 NETWORK 机柜使用原有逻辑
                                     if (remainingPrimary === 0 && remainingSecondary === 0) {
                                         stats.detailedStats[type]['Complete Power Loss']++;
-                                        if (isEuclid) stats.detailedStats[type].euclidCount['Complete Power Loss']++;
-                                    } else if (remainingPrimary < expected.primary && remainingSecondary === expected.secondary) {
+                                    } else if (remainingPrimary === 0 && remainingSecondary > 0) {
                                         stats.detailedStats[type]['Lost Primary']++;
-                                        if (isEuclid) stats.detailedStats[type].euclidCount['Lost Primary']++;
-                                    } else if (remainingSecondary < expected.secondary && remainingPrimary === expected.primary) {
+                                    } else if (remainingSecondary === 0 && remainingPrimary > 0) {
                                         stats.detailedStats[type]['Lost Secondary']++;
-                                        if (isEuclid) stats.detailedStats[type].euclidCount['Lost Secondary']++;
-                                    } else if (remainingPrimary < expected.primary && remainingSecondary < expected.secondary) {
+                                    } else if (remainingPrimary < expected.primary &&
+                                               remainingSecondary < expected.secondary &&
+                                               remainingPrimary > 0 && remainingSecondary > 0) {
                                         stats.detailedStats[type]['Partial Power Loss']++;
-                                        if (isEuclid) stats.detailedStats[type].euclidCount['Partial Power Loss']++;
                                     }
                                 }
-                            } else {
-                                // 非 NETWORK 类型机柜的原有逻辑
-                                if (remainingPrimary === 0 && remainingSecondary === 0 &&
-                                    (expected.primary > 0 || expected.secondary > 0)) {
-                                    stats.detailedStats[type]['Complete Power Loss']++;
-                                    if (isEuclid) stats.detailedStats[type].euclidCount['Complete Power Loss']++;
-                                } else if (hasDualPower) {
-                                    if (remainingPrimary < expected.primary && remainingSecondary === expected.secondary) {
-                                        stats.detailedStats[type]['Lost Primary']++;
-                                        if (isEuclid) stats.detailedStats[type].euclidCount['Lost Primary']++;
-                                    } else if (remainingSecondary < expected.secondary && remainingPrimary === expected.primary) {
-                                        stats.detailedStats[type]['Lost Secondary']++;
-                                        if (isEuclid) stats.detailedStats[type].euclidCount['Lost Secondary']++;
-                                    } else if (remainingPrimary < expected.primary && remainingSecondary < expected.secondary) {
+                            }
+                            else {
+                                if (!hasDualPower) {
+                                    // 非 NETWORK 类型机柜的原有逻辑
+                                    if (remainingPrimary === 0 && expected.primary > 0) {
+                                        stats.detailedStats[type]['Complete Power Loss']++;
+                                        if (isEuclid) stats.detailedStats[type].euclidCount['Complete Power Loss']++;
+                                    } else if (remainingPrimary < expected.primary) {
                                         stats.detailedStats[type]['Partial Power Loss']++;
-                                        if (isEuclid) stats.detailedStats[type].euclidCount['Partial Power Loss']++;
                                     }
                                 } else {
-                                    if (expected.primary > 0 && remainingPrimary < expected.primary) {
+                                    if (remainingPrimary === 0 && remainingSecondary === 0) {
+                                        stats.detailedStats[type]['Complete Power Loss']++;
+                                    } else if (remainingPrimary === 0 && remainingSecondary > 0) {
+                                        stats.detailedStats[type]['Lost Primary']++;
+                                    } else if (remainingSecondary === 0 && remainingPrimary > 0) {
+                                        stats.detailedStats[type]['Lost Secondary']++;
+                                    } else if (remainingPrimary < expected.primary &&
+                                               remainingSecondary < expected.secondary &&
+                                               remainingPrimary > 0 && remainingSecondary > 0) {
                                         stats.detailedStats[type]['Partial Power Loss']++;
-                                        if (isEuclid) stats.detailedStats[type].euclidCount['Partial Power Loss']++;
                                     }
                                 }
                             }
@@ -1618,8 +1612,9 @@
                                                                           ).length;
 
                     const hasDualPower = expected.primary > 0 && expected.secondary > 0;
+                    const redundancy = posInfo.power_redundancy;
 
-                    if (type === 'NETWORK') {
+                    if (redundancy === '2N' || redundancy === 'N+C') {
                         if (!hasDualPower) {
                             // 单电源 NETWORK 机柜
                             if (metric === 'Complete Power Loss' &&
@@ -1630,49 +1625,45 @@
                                 result.push(position.position);
                             }
                         } else {
-                            // 双电源 NETWORK 机柜
                             if (metric === 'Complete Power Loss' &&
                                 remainingPrimary === 0 && remainingSecondary === 0) {
                                 result.push(position.position);
-                            } else if (metric === 'Lost Primary' &&
-                                       remainingPrimary < expected.primary &&
-                                       remainingSecondary === expected.secondary) {
+                            } else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) {
                                 result.push(position.position);
-                            } else if (metric === 'Lost Secondary' &&
-                                       remainingSecondary < expected.secondary &&
-                                       remainingPrimary === expected.primary) {
+                            } else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) {
                                 result.push(position.position);
                             } else if (metric === 'Partial Power Loss' &&
                                        remainingPrimary < expected.primary &&
-                                       remainingSecondary < expected.secondary) {
+                                       remainingSecondary < expected.secondary &&
+                                       remainingPrimary > 0 && remainingSecondary > 0) {
                                 result.push(position.position);
                             }
                         }
                     } else {
-                        // 非 NETWORK 类型机柜的原有逻辑
-                        if (metric === 'Complete Power Loss' &&
-                            remainingPrimary === 0 && remainingSecondary === 0 &&
-                            (expected.primary > 0 || expected.secondary > 0)) {
-                            result.push(position.position);
-                        } else if (hasDualPower) {
-                            if (metric === 'Lost Primary' &&
-                                remainingPrimary < expected.primary &&
-                                remainingSecondary === expected.secondary) {
+                        if (!hasDualPower) {
+                            // 非 NETWORK 类型机柜的原有逻辑
+                            if (metric === 'Complete Power Loss' &&
+                                remainingPrimary === 0 && remainingSecondary === 0 &&
+                                (expected.primary > 0 || expected.secondary > 0)) {
                                 result.push(position.position);
-                            } else if (metric === 'Lost Secondary' &&
-                                       remainingSecondary < expected.secondary &&
-                                       remainingPrimary === expected.primary) {
+                            } else if (metric === 'Partial Power Loss' &&
+                                       remainingPrimary < expected.primary) {
+                                result.push(position.position);
+                            }
+                        } else {
+                            if (metric === 'Complete Power Loss' &&
+                                remainingPrimary === 0 && remainingSecondary === 0) {
+                                result.push(position.position);
+                            } else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) {
+                                result.push(position.position);
+                            } else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) {
                                 result.push(position.position);
                             } else if (metric === 'Partial Power Loss' &&
                                        remainingPrimary < expected.primary &&
-                                       remainingSecondary < expected.secondary) {
+                                       remainingSecondary < expected.secondary &&
+                                       remainingPrimary > 0 && remainingSecondary > 0) {
                                 result.push(position.position);
                             }
-                        } else if (!hasDualPower &&
-                                   metric === 'Partial Power Loss' &&
-                                   expected.primary > 0 &&
-                                   remainingPrimary < expected.primary) {
-                            result.push(position.position);
                         }
                     }
                 });
@@ -2066,7 +2057,7 @@
                         modal.querySelector('.modal-header').innerHTML = `
                 <div class="modal-title">${type} - ${metric} (${positions.length} positions${
                     euclidPositions.length > 0 ? `, ${euclidPositions.length} Euclid` : ''
-                })</div>
+                    })</div>
                 <div class="modal-actions">
                     <button id="copyPositionsBtn" class="copy-positions-button">
                         <span class="export-icon">📋</span> Copy
@@ -2075,22 +2066,22 @@
                 </div>
             `;
 
-                    // 生成位置列表
-                    modal.querySelector('.position-list').innerHTML = positions
-                        .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
-                        .map(position => {
-                        const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
-                            return pos.position === position && pos.type.toUpperCase() === type;
-                        });
+                        // 生成位置列表
+                        modal.querySelector('.position-list').innerHTML = positions
+                            .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
+                            .map(position => {
+                            const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
+                                return pos.position === position && pos.type.toUpperCase() === type;
+                            });
 
-                        if (!matchingPosition) return '';
+                            if (!matchingPosition) return '';
 
-                        const [positionKey] = matchingPosition;
-                        const posInfo = positionMap.get(positionKey);
-                        const isEuclid = posInfo?.is_brick === true;
-                        const deployedAssetId = posInfo?.deployed_asset_id;
+                            const [positionKey] = matchingPosition;
+                            const posInfo = positionMap.get(positionKey);
+                            const isEuclid = posInfo?.is_brick === true;
+                            const deployedAssetId = posInfo?.deployed_asset_id;
 
-                        return `
+                            return `
                         <div class="position-item ${isEuclid ? 'euclid-position' : ''}">
                             <span class="position-name">${position}</span>
                             ${isEuclid ? `
@@ -2109,29 +2100,29 @@
                             .filter(html => html)
                             .join('');
 
-                    // 添加复制按钮的事件监听器
-                    const copyBtn = modal.querySelector('#copyPositionsBtn');
-                    if (copyBtn) {
-                        EventHandlers.handleCopyButton(copyBtn, positionsTextWithEuclid);
-                    }
+                        // 添加复制按钮的事件监听器
+                        const copyBtn = modal.querySelector('#copyPositionsBtn');
+                        if (copyBtn) {
+                            EventHandlers.handleCopyButton(copyBtn, positionsTextWithEuclid);
+                        }
 
-                    modal.style.display = 'block';
-                    backdrop.style.display = 'block';
-                } else if (cell.dataset.patchPositions) {
-                    // 处理 Patch rack 的点击
-                    const positions = JSON.parse(cell.dataset.patchPositions);
+                        modal.style.display = 'block';
+                        backdrop.style.display = 'block';
+                    } else if (cell.dataset.patchPositions) {
+                        // 处理 Patch rack 的点击
+                        const positions = JSON.parse(cell.dataset.patchPositions);
 
-                    // 生成包含房间号的位置文本
-                    const positionsText = positions
-                    .sort((a, b) => {
-                        const aCompare = `${a.room} ${a.position}`;
-                        const bCompare = `${b.room} ${b.position}`;
-                        return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
-                    })
-                    .map(pos => `${pos.room} ${pos.position}`)
-                    .join('\n');
+                        // 生成包含房间号的位置文本
+                        const positionsText = positions
+                        .sort((a, b) => {
+                            const aCompare = `${a.room} ${a.position}`;
+                            const bCompare = `${b.room} ${b.position}`;
+                            return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
+                        })
+                        .map(pos => `${pos.room} ${pos.position}`)
+                        .join('\n');
 
-                    modal.querySelector('.modal-header').innerHTML = `
+                        modal.querySelector('.modal-header').innerHTML = `
                     <div class="modal-title">Patch racks (${positions.length} positions)</div>
                     <div class="modal-actions">
                         <button id="copyPositionsBtn" class="copy-positions-button">
@@ -2181,19 +2172,19 @@
                                 <span class="position-name">${position.position}</span>
                             </div>
                         `;
-                    })
-                        .join('');
+                        })
+                            .join('');
+                    }
+
+                    modal.style.display = 'block';
+                    backdrop.style.display = 'block';
+
+                } catch (error) {
+                    console.error('Error handling cell click:', error);
                 }
-
-                modal.style.display = 'block';
-                backdrop.style.display = 'block';
-
-            } catch (error) {
-                console.error('Error handling cell click:', error);
-            }
+            });
         });
-    });
-}
+    }
 
     GM_addStyle(`
 
