@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.23
+// @version      1.24
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -1457,6 +1457,22 @@
                 </div>
             </div>`;
 
+            // 在 positionsHtml 计算之前，添加位置计数
+            const filteredPositionsCount = Object.entries(positions)
+            .filter(([key]) => positionsToShow.has(key))
+            .length;
+
+            // 创建位置计数的 HTML
+            const positionsCountHtml = `
+                <div class="positions-count-container">
+                    <div class="positions-count">
+                        <span class="count-label">Total Positions:</span>
+                        <span class="count-value">${filteredPositionsCount}</span>
+                    </div>
+                </div>
+            `;
+
+
             // 渲染结果
             const positionsHtml = Object.entries(positions)
             .filter(([key]) => positionsToShow.has(key))
@@ -1567,6 +1583,16 @@
                 newStatsContainer.className = 'stats-container';
                 newStatsContainer.innerHTML = statsHtml;
                 contentContainer.appendChild(newStatsContainer);
+            }
+
+            // 添加位置计数
+            const positionsCountContainer = contentContainer.querySelector('.positions-count-container');
+            if (positionsCountContainer) {
+                positionsCountContainer.innerHTML = positionsCountHtml;
+            } else {
+                const newPositionsCountContainer = document.createElement('div');
+                newPositionsCountContainer.innerHTML = positionsCountHtml;
+                contentContainer.appendChild(newPositionsCountContainer);
             }
 
             // 更新位置信息
@@ -2186,7 +2212,7 @@
         });
     }
 
-    GM_addStyle(`
+GM_addStyle(`
 
 .site-selection-section {
 padding: 20px;
@@ -3155,6 +3181,25 @@ height: 43px;
     width: 200px;
     vertical-align: middle;
     overflow: hidden;
+}
+
+.positions-count {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+}
+
+.count-label {
+    font-weight: bold;
+    color: #1976d2;
+}
+
+.count-value {
+    font-size: 1em;
+    font-weight: bold;
+    color: #333;
+    padding: 2px 10px;
 }
 `);
 
