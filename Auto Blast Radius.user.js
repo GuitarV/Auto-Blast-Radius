@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.24
+// @version      1.3
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -202,6 +202,28 @@
         filtersContainer.style.display = 'none';
         container.appendChild(filtersContainer);
 
+        // 添加静态可折叠 Tips 容器
+        const tipsContainer = document.createElement('div');
+        tipsContainer.className = 'tips-container';
+        tipsContainer.style.display = 'none';
+        tipsContainer.innerHTML = `
+            <div class="tips-header">
+                <div class="tips-title">
+                    <span class="tips-icon">💡</span>
+                    <span>Tips</span>
+                </div>
+                <div class="tips-toggle">▼</div>
+            </div>
+            <div class="tips-content">
+                <ul class="tips-list">
+                    <li><strong>Summary Table：</strong>目前表格中只统计Deployed状态的机柜，Patch Rack不计入其中</li>
+                    <li><strong>Detail Info：</strong>已自动过滤Floorplan中的Non-rack和Mini-rack位置</li>
+                    <li><strong>点击查看：</strong>点击Summary Table中的数字可查看详细机柜列表</li>
+                </ul>
+            </div>
+        `;
+        container.appendChild(tipsContainer);
+
         // 添加进度条容器
         const progressContainer = document.createElement('div');
         progressContainer.className = 'progress-container';
@@ -329,6 +351,11 @@
                             progressContainer.style.display = 'none';
                             currentFiltersContainer.style.display = 'grid';
                             currentTopoView.style.display = 'block';
+                            // 显示 Tips
+                            const tipsContainer = document.querySelector('.tips-container');
+                            if (tipsContainer) {
+                                tipsContainer.style.display = 'block';
+                            }
                             updateDisplay({});
                         }, 100);
                     } else {
@@ -353,6 +380,14 @@
                 }
             }
         });
+        const tipsHeader = container.querySelector('.tips-header');
+        if (tipsHeader) {
+            tipsHeader.addEventListener('click', function() {
+                const tipsContainer = this.closest('.tips-container');
+                tipsContainer.classList.toggle('collapsed');
+            });
+        }
+
         return container;
     }
 
@@ -492,7 +527,8 @@
             { label: 'Utility', column: 'routingInfo.utility' },
             { label: 'Power Feed', column: 'Power Feed' },
             { label: 'Rack Status', column: 'status' },
-            { label: 'Rack Type', column: 'type' }
+            { label: 'Rack Type', column: 'type' },
+            { label: 'Capacity', column: 'power_kva' }
         ];
     }
 
@@ -653,6 +689,7 @@
         'WMW Puffin Med': 'Network',
         'IRON RACK': 'Network',
         'Data Center Oper': 'Network',
+        'Bulk Fiber': 'Network',
 
         'CloudFront': 'Network',
         'Edge': 'Network',
@@ -687,7 +724,6 @@
         'Thermal': 'Patch',
         'ATS': 'Patch',
         'IDF Row': 'Patch',
-        'Bulk Fiber': 'Patch',
 
         // 其他特殊类型
         'Cabling Infrastr': 'Mini rack',
@@ -821,6 +857,10 @@
             if (positionData && typeof positionData === 'object' && Object.keys(positionData).length > 0) {
                 Object.entries(positionData).forEach(([key, item]) => {
                     if (!item || typeof item !== 'object') return;
+                    // 过滤掉 type 为 ON_MINIRACK 的位置
+                    if (item.type === 'OH_MINIRACK' || item.type === 'NONRACK') {
+                        return;
+                    }
 
                     const networkInfo = networkDataMap.get(item.legacy_position_id) || {
                         is_brick: false
@@ -841,6 +881,11 @@
                         // 如果类型是 unknown 或 intended_customer 是 ANY，则直接使用 uplink_fabric
                         if (rackType === 'unknown' || item.intended_customer === 'ANY') {
                             rackType = item.uplink_fabric.toUpperCase();
+                        }
+
+                        // 将 0 KVA 的 Network 机柜重新分类为 Patch
+                        if (rackType === 'Network' && parseFloat(item.power_kva) === 0) {
+                            rackType = 'Patch';
                         }
                     }
 
@@ -939,6 +984,13 @@
                             const value = column === 'type' ? posInfo?.type : posInfo?.status;
                             return values.includes(value);
                         }
+                        // 处理 power_kva（Capacity）
+                        else if (column === 'power_kva') {
+                            const positionKey = `${item['Position Room']}-${item['Position']}`;
+                            const posInfo = positionMap.get(positionKey);
+                            const capacityValue = posInfo?.power_kva;
+                            return values.some(value => parseFloat(value) === capacityValue);
+                        }
                         // 处理 transformer 和 utility
                         else if (column === 'routingInfo.transformer' || column === 'routingInfo.utility') {
                             const routingValue = column === 'routingInfo.transformer' ?
@@ -963,64 +1015,53 @@
                 filteredData.map(row => row['Circuit Name'])   // 有筛选条件时，筛选出的电路受影响
             );
 
-
-            // 创建要显示的位置集合
+            // 创建要显示的位置集合（优化版：基于 filteredData 派生）
             const positionsToShow = new Set();
+            const powerRelatedFilters = ['PDU Name', 'UPS Group', 'USB', 'Power Feed', 'routingInfo.transformer', 'routingInfo.utility'];
 
-            // 首先处理所有 Cloudforge 位置
-            positionMap.forEach((posInfo, positionKey) => {
-                let shouldShow = true;
-                const powerRelatedFilters = ['PDU Name', 'UPS Group', 'USB', 'Power Feed', 'routingInfo.transformer', 'routingInfo.utility'];
-                const hasPowerChainData = EXCEL_DATA.some(row =>
-                                                          `${row['Position Room']}-${row['Position']}` === positionKey
-                                                         );
-
-                // 检查每个筛选条件
-                Object.entries(filters).forEach(([column, values]) => {
-                    if (!values || values.length === 0) return;
-
-                    const isPowerRelated = powerRelatedFilters.includes(column);
-
-                    // 如果是电力相关的筛选条件且该位置没有电力数据，则不显示
-                    if (isPowerRelated && !hasPowerChainData) {
-                        shouldShow = false;
-                        return;
-                    }
-
-                    // 将 switch-case 改为 if-else 结构
-                    if (column === 'type' || column === 'status') {
-                        const valueToCheck = column === 'type' ?
-                              (posInfo?.type || 'unknown').toUpperCase() :
-                        (posInfo?.status || 'unknown');
-                        shouldShow = shouldShow && values.includes(valueToCheck);
-                    } else if (column === 'Position Room') {
-                        const roomToCheck = posInfo.room_name;
-                        shouldShow = shouldShow && values.includes(roomToCheck);
-                    } else if (column === 'Position') {
-                        const positionToCheck = posInfo.name;
-                        shouldShow = shouldShow && values.includes(positionToCheck);
-                    } else if (powerRelatedFilters.includes(column)) {
-                        if (hasPowerChainData) {
-                            const hasMatchingPower = EXCEL_DATA.some(row => {
-                                if (`${row['Position Room']}-${row['Position']}` !== positionKey) return false;
-
-                                if (column.startsWith('routingInfo.')) {
-                                    const field = column.split('.')[1];
-                                    return values.includes(row.routingInfo?.[field]);
-                                } else {
-                                    return values.includes(row[column]);
-                                }
-                            });
-                            shouldShow = shouldShow && hasMatchingPower;
-                        }
-                    }
-                });
-
-                if (shouldShow) {
-                    positionsToShow.add(positionKey);
-                }
+            // 1. 从 filteredData 中提取所有位置（适用于有电力数据的位置）
+            filteredData.forEach(row => {
+                positionsToShow.add(`${row['Position Room']}-${row['Position']}`);
             });
 
+            // 2. 处理没有电力数据但需要显示的位置（仅适用于非电力相关筛选）
+            const hasOnlyNonPowerFilters = Object.keys(filters).length === 0 ||
+                Object.keys(filters).every(col => !powerRelatedFilters.includes(col));
+
+            if (hasOnlyNonPowerFilters) {
+                positionMap.forEach((posInfo, positionKey) => {
+                    // 如果该位置已经在 positionsToShow 中，跳过
+                    if (positionsToShow.has(positionKey)) return;
+
+                    let shouldShow = true;
+
+                    // 检查非电力相关的筛选条件
+                    Object.entries(filters).forEach(([column, values]) => {
+                        if (!values || values.length === 0) return;
+
+                        if (column === 'type' || column === 'status') {
+                            const valueToCheck = column === 'type' ?
+                                (posInfo?.type || 'unknown').toUpperCase() :
+                                (posInfo?.status || 'unknown');
+                            shouldShow = shouldShow && values.includes(valueToCheck);
+                        }
+                        else if (column === 'power_kva') {
+                            const capacityValue = posInfo?.power_kva;
+                            shouldShow = shouldShow && values.some(value => parseFloat(value) === capacityValue);
+                        }
+                        else if (column === 'Position Room') {
+                            shouldShow = shouldShow && values.includes(posInfo.room_name);
+                        }
+                        else if (column === 'Position') {
+                            shouldShow = shouldShow && values.includes(posInfo.name);
+                        }
+                    });
+
+                    if (shouldShow) {
+                        positionsToShow.add(positionKey);
+                    }
+                });
+            }
 
             const usedCircuits = new Set(EXCEL_DATA.map(row => row['Circuit Name']));
             const positions = {};
@@ -1574,6 +1615,14 @@
                 topoView.appendChild(contentContainer);
             }
 
+            let summaryTitle = contentContainer.querySelector('.summary-title');
+            if (!summaryTitle) {
+                summaryTitle = document.createElement('h3');
+                summaryTitle.className = 'section-title summary-title';
+                summaryTitle.textContent = 'Summary Table';
+                contentContainer.appendChild(summaryTitle);
+            }
+
             // 更新统计信息
             const statsContainer = contentContainer.querySelector('.stats-container');
             if (statsContainer) {
@@ -1593,6 +1642,15 @@
                 const newPositionsCountContainer = document.createElement('div');
                 newPositionsCountContainer.innerHTML = positionsCountHtml;
                 contentContainer.appendChild(newPositionsCountContainer);
+            }
+
+            // 添加 Detail Info 标题
+            let detailTitle = contentContainer.querySelector('.detail-title');
+            if (!detailTitle) {
+                detailTitle = document.createElement('h3');
+                detailTitle.className = 'section-title detail-title';
+                detailTitle.textContent = 'Detail Info';
+                contentContainer.appendChild(detailTitle);
             }
 
             // 更新位置信息
@@ -1927,6 +1985,19 @@
                         status
                     ));
                 });
+            }
+            // 新增：处理 power_kva（Capacity）
+            else if (filter.column === 'power_kva') {
+                // 从 positionMap 中获取所有唯一的 power_kva 值
+                const capacities = [...new Set(
+                    Array.from(positionMap.values())
+                        .map(info => info.power_kva)
+                        .filter(kva => kva !== null && kva !== undefined)
+                )].sort((a, b) => a - b);  // 数值排序
+
+                capacities.forEach(capacity => {
+                    select.append(new Option(capacity, capacity));
+                });
             } else {
                 // 只为有电力数据的位置添加电力相关的选项
                 const options = [...new Set(EXCEL_DATA
@@ -2035,52 +2106,52 @@
     }
 
 
-    function setupModalEvents() {
-        const modal = document.querySelector('.position-modal');
-        const backdrop = document.querySelector('.modal-backdrop');
+function setupModalEvents() {
+    const modal = document.querySelector('.position-modal');
+    const backdrop = document.querySelector('.modal-backdrop');
 
-        if (!modal || !backdrop) {
-            console.error('Modal elements not found');
-            return;
-        }
+    if (!modal || !backdrop) {
+        console.error('Modal elements not found');
+        return;
+    }
 
-        EventHandlers.handleModalClose(modal, backdrop);
+    EventHandlers.handleModalClose(modal, backdrop);
 
-        document.querySelectorAll('.stats-cell.clickable').forEach(cell => {
-            cell.addEventListener('click', () => {
-                try {
-                    // 判断是主表格的单元格还是下游机柜的单元格
-                    if (cell.dataset.type && cell.dataset.metric) {
-                        const type = cell.dataset.type;
-                        const metric = cell.dataset.metric;
-                        const positions = JSON.parse(cell.dataset.positions);
+    document.querySelectorAll('.stats-cell.clickable').forEach(cell => {
+        cell.addEventListener('click', () => {
+            try {
+                // 判断是主表格的单元格还是下游机柜的单元格
+                if (cell.dataset.type && cell.dataset.metric) {
+                    const type = cell.dataset.type;
+                    const metric = cell.dataset.metric;
+                    const positions = JSON.parse(cell.dataset.positions);
 
-                        // 获取这些位置中的 Euclid positions
-                        const euclidPositions = positions.filter(position => {
-                            const matchingPosition = Object.entries(window.filteredPositions).find(([key, pos]) => {
-                                return pos.position === position && pos.type.toUpperCase() === type;
-                            });
-                            if (!matchingPosition) return false;
-                            const [positionKey] = matchingPosition;
-                            const posInfo = positionMap.get(positionKey);
-                            return posInfo?.is_brick === true;
+                    // 获取这些位置中的 Euclid positions
+                    const euclidPositions = positions.filter(position => {
+                        const matchingPosition = Object.entries(window.filteredPositions).find(([key, pos]) => {
+                            return pos.position === position && pos.type.toUpperCase() === type;
                         });
+                        if (!matchingPosition) return false;
+                        const [positionKey] = matchingPosition;
+                        const posInfo = positionMap.get(positionKey);
+                        return posInfo?.is_brick === true;
+                    });
 
-                        // 生成包含 Euclid 标识的位置文本
-                        const positionsTextWithEuclid = positions
-                        .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
-                        .map(position => {
-                            const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
-                                return pos.position === position && pos.type.toUpperCase() === type;
-                            });
-                            if (!matchingPosition) return position;
-                            const [positionKey] = matchingPosition;
-                            const posInfo = positionMap.get(positionKey);
-                            return posInfo?.is_brick ? `${position}(Euclid)` : position;
-                        })
-                        .join('\n');
+                    // 生成包含 Euclid 标识的位置文本
+                    const positionsTextWithEuclid = positions
+                    .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
+                    .map(position => {
+                        const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
+                            return pos.position === position && pos.type.toUpperCase() === type;
+                        });
+                        if (!matchingPosition) return position;
+                        const [positionKey] = matchingPosition;
+                        const posInfo = positionMap.get(positionKey);
+                        return posInfo?.is_brick ? `${position}(Euclid)` : position;
+                    })
+                    .join('\n');
 
-                        modal.querySelector('.modal-header').innerHTML = `
+                    modal.querySelector('.modal-header').innerHTML = `
                 <div class="modal-title">${type} - ${metric} (${positions.length} positions${
                     euclidPositions.length > 0 ? `, ${euclidPositions.length} Euclid` : ''
                     })</div>
@@ -3200,6 +3271,119 @@ height: 43px;
     font-weight: bold;
     color: #333;
     padding: 2px 10px;
+}
+
+/* 静态可折叠 Tips 样式 */
+.tips-container {
+    margin: 15px 0;
+    background: #f8f9fa;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.tips-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #4A53D3 0%, #4AD3CA 100%);
+    color: white;
+    cursor: pointer;
+    user-select: none;
+}
+
+.tips-title {
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.tips-icon {
+    font-size: 20px;
+    margin-right: 10px;
+}
+
+.tips-toggle {
+    font-size: 14px;
+    transition: transform 0.3s ease;
+}
+
+.tips-container.collapsed .tips-toggle {
+    transform: rotate(-90deg);
+}
+
+.tips-content {
+    padding: 15px 20px;
+    background: white;
+    max-height: 500px;
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease;
+}
+
+.tips-container.collapsed .tips-content {
+    max-height: 0;
+    padding: 0 20px;
+}
+
+.tips-list {
+    margin: 0;
+    padding-left: 20px;
+    list-style: none;
+}
+
+.tips-list li {
+    margin-bottom: 10px;
+    line-height: 1.6;
+    color: #333;
+    position: relative;
+    padding-left: 15px;
+}
+
+.tips-list li:before {
+    content: "▸";
+    position: absolute;
+    left: 0;
+    color: #667eea;
+    font-weight: bold;
+}
+
+.tips-list li:last-child {
+    margin-bottom: 0;
+}
+
+.tips-list li strong {
+    color: #667eea;
+}
+
+/* 区域标题样式 */
+.section-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #333;
+    margin: 25px 0 15px 0;
+    padding-bottom: 10px;
+    border-bottom: 3px solid #667eea;
+    position: relative;
+}
+
+.section-title:before {
+    content: '';
+    position: absolute;
+    bottom: -3px;
+    left: 0;
+    width: 60px;
+    height: 3px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.summary-title {
+    margin-top: 10px;
+}
+
+.detail-title {
+    margin-top: 30px;
 }
 `);
 
