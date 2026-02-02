@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -24,6 +24,7 @@
 // @connect      idp.amazon.com
 // @connect      *.aws-border.cn
 // @connect      *.amazon.com
+// @connect      ncfs-api.corp.amazon.com
 // @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
 // @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
 
@@ -93,6 +94,7 @@
         'PEK7',
         'PEK50',
         'PKX140',
+        'SIN2',
         // ... 添加更多站点
     ];
 
@@ -260,39 +262,6 @@
             }
         });
 
-        // AHA 登录检查函数
-        function checkAHALogin() {
-            return new Promise((resolve) => {
-                GM_xmlhttpRequest({
-                    method: "GET",
-                    url: 'https://aha.bjs.aws-border.cn/health',
-                    headers: {
-                        "Accept": "application/json",
-                    },
-                    timeout: 10000,
-                    withCredentials: true,
-                    onload: function(response) {
-                        // 如果需要登录
-                        if (response.finalUrl && response.finalUrl.includes('midway-auth.aws-border.cn')) {
-                            console.log('AHA login required');
-                            // 打开登录页面，但不等待
-                            window.open('https://midway-auth.aws-border.cn/login', '_blank');
-                        }
-                        resolve();
-                    },
-                    onerror: function(error) {
-                        console.warn('AHA login check failed:', error);
-                        resolve();
-                    },
-                    ontimeout: function() {
-                        console.warn('AHA login check timeout');
-                        resolve();
-                    }
-                });
-            });
-        }
-
-
         // 选项点击处理
         optionsList.addEventListener('click', async (event) => {
             if (event.target.tagName === 'LI') {
@@ -318,9 +287,6 @@
                         progressStep.textContent = step;
                     };
 
-                    // 检查 AHA 登录状态
-                    updateProgress(5, 'Checking AHA login status...');
-                    await checkAHALogin();
 
                     // 加载主数据
                     updateProgress(10, 'Loading site topology data😀...');
@@ -329,13 +295,13 @@
                         throw new Error('Invalid data format received');
                     }
 
-                    updateProgress(30, 'Processing data🤣...');
+                    updateProgress(20, 'Processing data🤣...');
                     EXCEL_DATA = data;
 
-                    updateProgress(50, 'Getting position site...');
+                    updateProgress(40, 'Getting position site...');
                     const site = getPositionSite(EXCEL_DATA);
 
-                    updateProgress(60, 'Fetching position info (Maybe 1-2 mins🤔)...');
+                    updateProgress(50, 'Fetching position info (Maybe 1-2 mins🤔)...');
                     positionMap = await fetchPositionInfo(site);
 
                     updateProgress(90, 'Preparing display...');
@@ -734,44 +700,23 @@
     async function fetchPositionInfo(site) {
         const urls = {
             position: `https://cloudforge-build.amazon.com/datacenters/${site}/equipments/floorplans/positions.json`,
-            network: `https://cloudforge-build.amazon.com/datacenters/${site}/floorplans/network_connectivity.json`,
-            euclid: `https://aha.bjs.aws-border.cn/blast-radius/api/get-euclid-bricks-for-site/${site}`
+            network: `https://cloudforge-build.amazon.com/datacenters/${site}/floorplans/network_connectivity.json`
         };
 
         console.log('Fetching from URLs:', urls);
 
-        const maxRetries = 3;
-        const retryDelay = 500;
-
-        async function fetchWithRetry(url, method, retryCount = 0) {
-            try {
-                const response = await makeRequest(url, method);
-                return response;
-            } catch (error) {
-                if (retryCount < maxRetries) {
-                    console.log(`Retry ${retryCount + 1} for ${url}`);
-                    await new Promise(resolve => setTimeout(resolve, retryDelay * (retryCount + 1)));
-                    return fetchWithRetry(url, method, retryCount + 1);
-                }
-                throw error;
-            }
-        }
-
         try {
-            // 使用 Promise.allSettled 并行处理所有请求
+            // 并行请求 position 和 network 数据
             console.log('Starting parallel requests...');
-            const [positionResult, networkResult, euclidResult] = await Promise.allSettled([
+            const [positionResult, networkResult] = await Promise.allSettled([
                 makeRequest(urls.position, 'GET'),
-                makeRequest(urls.network, 'GET'),
-                makeRequest(urls.euclid, 'GET')
+                makeRequest(urls.network, 'GET')
             ]);
 
-            console.log('All requests completed. Results:', {
+            console.log('Core requests completed. Results:', {
                 position: positionResult.status,
-                network: networkResult.status,
-                euclid: euclidResult.status
+                network: networkResult.status
             });
-
 
             // 检查核心数据是否成功
             if (positionResult.status === 'rejected') {
@@ -805,85 +750,154 @@
                 networkData = {};
             }
 
-            // 处理Euclid数据
-            console.log('Processing Euclid data...');
-            let hasEuclidAccess = false;
-            let euclidData = {};
-            if (euclidResult.status === 'fulfilled') {
-                try {
-                    euclidData = JSON.parse(euclidResult.value.responseText);
-                    hasEuclidAccess = true;
-                } catch (e) {
-                    console.warn('Error parsing Euclid data:', e);
-                }
-            }
-
-            // 创建网络数据映射
-            console.log('Creating data mappings...');
+            // 创建网络数据映射，同时收集 Euclid brick 信息
+            console.log('Creating network data mapping...');
             const networkDataMap = new Map();
-            const euclidRacksMap = new Map();
+            const euclidBricks = []; // 收集所有 Euclid brick 的 hostname
 
-            // 处理网络数据
-            console.log('Processing network data mapping...');
             if (networkData && typeof networkData === 'object') {
                 Object.entries(networkData).forEach(([_, item]) => {
                     if (item.position_id) {
                         networkDataMap.set(item.position_id, {
-                            is_brick: item.is_brick || false
+                            is_brick: item.is_brick || false,
+                            hostname: item.hostname || null
+                        });
+
+                        // 如果是 brick 且有 hostname，收集起来
+                        if (item.is_brick && item.hostname) {
+                            euclidBricks.push({
+                                position_id: item.position_id,
+                                hostname: item.hostname
+                            });
+                        }
+                    }
+                });
+            }
+
+            console.log(`Found ${euclidBricks.length} Euclid bricks with hostnames`);
+
+            // 创建 asset_id 到 position 的反向映射
+            console.log('Creating asset_id to position mapping...');
+            const assetIdToPositionMap = new Map();
+            if (positionData && typeof positionData === 'object') {
+                Object.entries(positionData).forEach(([key, item]) => {
+                    if (item.deployed_asset_id) {
+                        assetIdToPositionMap.set(item.deployed_asset_id, {
+                            room: item.room_name,
+                            position: item.name
                         });
                     }
                 });
             }
 
-            // 处理Euclid数据
-            console.log('Processing Euclid racks mapping...');
-            if (hasEuclidAccess && euclidData && typeof euclidData === 'object') {
-                Object.entries(euclidData).forEach(([assetId, brick]) => {
-                    if (brick.rackAssetId) {
-                        euclidRacksMap.set(brick.rackAssetId, {
-                            brickHostName: brick.brickHostName,
-                            euclidVersion: brick.euclidVersion,
-                            downstreamRacks: brick.downstreamServerRacks || []
-                        });
+            console.log(`Created mapping for ${assetIdToPositionMap.size} deployed assets`);
+
+            // 批量获取 Euclid brick 的下游机柜
+            console.log('Fetching downstream racks from NCFS API...');
+            const downstreamRacksMap = new Map(); // position_id -> downstream racks
+
+            if (euclidBricks.length > 0) {
+                // 使用批量处理，避免同时发起太多请求
+                const batchSize = 5;
+                const totalBatches = Math.ceil(euclidBricks.length / batchSize);
+
+                for (let i = 0; i < euclidBricks.length; i += batchSize) {
+                    const currentBatch = Math.floor(i / batchSize) + 1;
+                    console.log(`Processing NCFS batch ${currentBatch}/${totalBatches}...`);
+
+                    const batch = euclidBricks.slice(i, i + batchSize);
+                    const promises = batch.map(async (brick) => {
+                        try {
+                            const response = await makeRequest(
+                                `https://ncfs-api.corp.amazon.com/public/bricks/rack_mapping?brick=${brick.hostname}`,
+                                'GET'
+                            );
+
+                            if (response.status !== 200) {
+                                console.warn(`NCFS API returned status ${response.status} for brick ${brick.hostname}`);
+                                return { position_id: brick.position_id, downstreamRacks: [] };
+                            }
+
+                            const data = JSON.parse(response.responseText);
+
+                            // 获取下游机柜的 asset_id 列表并映射到位置信息
+                            const downstreamRacks = [];
+                            const seenAssetIds = new Set(); // 去重
+
+                            Object.values(data).flat().forEach(rack => {
+                                if (rack.asset_id && !seenAssetIds.has(rack.asset_id)) {
+                                    seenAssetIds.add(rack.asset_id);
+                                    const posInfo = assetIdToPositionMap.get(rack.asset_id);
+                                    if (posInfo) {
+                                        downstreamRacks.push({
+                                            room: posInfo.room,
+                                            position: posInfo.position,
+                                            asset_id: rack.asset_id,
+                                            rack_type: rack.rack_type,
+                                            fabric: rack.fabric
+                                        });
+                                    }
+                                }
+                            });
+
+                            console.log(`Brick ${brick.hostname}: found ${downstreamRacks.length} downstream racks`);
+                            return { position_id: brick.position_id, downstreamRacks };
+
+                        } catch (error) {
+                            console.warn(`Failed to fetch downstream for brick ${brick.hostname}:`, error);
+                            return { position_id: brick.position_id, downstreamRacks: [] };
+                        }
+                    });
+
+                    const results = await Promise.all(promises);
+                    results.forEach(result => {
+                        downstreamRacksMap.set(result.position_id, result.downstreamRacks);
+                    });
+
+                    // 批次间添加小延迟，避免请求过快
+                    if (i + batchSize < euclidBricks.length) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
                     }
-                });
+                }
             }
+
+            console.log(`Completed fetching downstream racks for ${downstreamRacksMap.size} bricks`);
 
             // 创建最终的位置映射
             console.log('Creating final position map...');
             const newPositionMap = new Map();
 
-            // 处理位置数据时整合所有信息
             if (positionData && typeof positionData === 'object' && Object.keys(positionData).length > 0) {
                 Object.entries(positionData).forEach(([key, item]) => {
                     if (!item || typeof item !== 'object') return;
-                    // 过滤掉 type 为 ON_MINIRACK 的位置
+
+                    // 过滤掉 type 为 OH_MINIRACK 或 NONRACK 的位置
                     if (item.type === 'OH_MINIRACK' || item.type === 'NONRACK') {
                         return;
                     }
 
                     const networkInfo = networkDataMap.get(item.legacy_position_id) || {
-                        is_brick: false
+                        is_brick: false,
+                        hostname: null
                     };
 
-                    // 只在有 Euclid 访问权限时才添加 Euclid 信息
-                    const euclidInfo = hasEuclidAccess && item.deployed_asset_id ?
-                          euclidRacksMap.get(item.deployed_asset_id) : null;
+                    // 获取下游机柜信息（只有 brick 才有）
+                    const downstreamRacks = networkInfo.is_brick ?
+                        downstreamRacksMap.get(item.legacy_position_id) || [] :
+                        null;
 
                     // 判断部署状态
                     const isDeployed = !!item.deployed_asset_id;
 
-                    // 只有在 deployed 状态时才处理 type
+                    // 处理 rack type
                     let rackType = 'unknown';
                     if (item.intended_customer) {
                         rackType = RACK_TYPE_MAPPING[item.intended_customer] || 'unknown';
 
-                        // 如果类型是 unknown 或 intended_customer 是 ANY，则直接使用 uplink_fabric
                         if (rackType === 'unknown' || item.intended_customer === 'ANY') {
                             rackType = item.uplink_fabric.toUpperCase();
                         }
 
-                        // 将 0 KVA 的 Network 机柜重新分类为 Patch
                         if (rackType === 'Network' && parseFloat(item.power_kva) === 0) {
                             rackType = 'Patch';
                         }
@@ -891,16 +905,16 @@
 
                     newPositionMap.set(`${item.room_name}-${item.name}`, {
                         status: item.disabled ? 'disabled' :
-                        (isDeployed ? 'deployed' : 'undeployed'),
+                            (isDeployed ? 'deployed' : 'undeployed'),
                         type: rackType.toUpperCase(),
                         power_kva: parseFloat(item.power_kva),
                         power_redundancy: item.power_redundancy,
                         deployed_asset_id: item.deployed_asset_id || null,
                         room_name: item.room_name,
                         name: item.name,
-                        hasEuclidAccess: hasEuclidAccess,
                         is_brick: networkInfo.is_brick,
-                        downstreamRacks: euclidInfo?.downstreamRacks || null
+                        hostname: networkInfo.hostname,
+                        downstreamRacks: downstreamRacks
                     });
                 });
             }
@@ -1347,11 +1361,18 @@
             });
 
             // 在处理 positions 时收集受影响的 Euclid racks
+
+            // 统计下游机柜，只计算 deployed 的位置
+            const uniqueDownstreamRacks = new Set();
+            const downstreamRacksList = [];
+
+            // 收集受影响的 Euclid racks
             const affectedEuclidRacks = new Set();
 
             Object.entries(positions).forEach(([key, position]) => {
                 const posInfo = positionMap.get(key);
-                if (position.status === 'deployed' && positionMap.get(key)?.downstreamRacks) {
+                // 检查是否为 brick 且有下游机柜数据
+                if (position.status === 'deployed' && posInfo?.is_brick && posInfo?.downstreamRacks) {
                     // 检查这个 rack 是否受到影响
                     const isAffected = position.affectedPowerChains.length > 0;
                     if (isAffected) {
@@ -1360,34 +1381,30 @@
                 }
             });
 
-            // 统计下游机柜，只计算 deployed 的位置
-            const uniqueDownstreamRacks = new Set();
-            const downstreamRacksList = [];
-            const hasEuclidAccess = Array.from(positionMap.values()).some(info => info.hasEuclidAccess);
+            // 收集下游机柜
+            affectedEuclidRacks.forEach(rackKey => {
+                const posInfo = positionMap.get(rackKey);
+                if (posInfo?.downstreamRacks && Array.isArray(posInfo.downstreamRacks)) {
+                    posInfo.downstreamRacks.forEach(downstream => {
+                        const downstreamKey = `${downstream.room}-${downstream.position}`;
+                        const downstreamPosInfo = positionMap.get(downstreamKey);
 
-            if (hasEuclidAccess) {
-                affectedEuclidRacks.forEach(rackKey => {
-                    const posInfo = positionMap.get(rackKey);
-                    if (posInfo?.downstreamRacks) {
-                        posInfo.downstreamRacks.forEach(downstream => {
-                            const downstreamKey = `${downstream.room}-${downstream.position}`;
-                            const downstreamPosInfo = positionMap.get(downstreamKey);
+                        // 检查是否为 deployed 状态且不重复
+                        if (downstreamPosInfo &&
+                            downstreamPosInfo.status === 'deployed' &&
+                            !uniqueDownstreamRacks.has(downstreamKey)) {
 
-                            // 检查是否为 deployed 状态且不重复
-                            if (downstreamPosInfo &&
-                                downstreamPosInfo.status === 'deployed' &&
-                                !uniqueDownstreamRacks.has(downstreamKey)) {
-
-                                uniqueDownstreamRacks.add(downstreamKey);
-                                downstreamRacksList.push({
-                                    room: downstream.room,
-                                    position: downstream.position
-                                });
-                            }
-                        });
-                    }
-                });
-            }
+                            uniqueDownstreamRacks.add(downstreamKey);
+                            downstreamRacksList.push({
+                                room: downstream.room,
+                                position: downstream.position,
+                                rack_type: downstream.rack_type,
+                                fabric: downstream.fabric
+                            });
+                        }
+                    });
+                }
+            });
 
             const downstreamStats = {
                 totalUniqueDownstream: uniqueDownstreamRacks.size,
@@ -1451,7 +1468,7 @@
                         </table>
                     </div>
                     <div class="side-stats">
-                        ${Array.from(positionMap.values()).some(info => info.hasEuclidAccess) && downstreamStats.totalUniqueDownstream > 0 ? `
+                        ${downstreamStats.totalUniqueDownstream > 0 ? `
                             <div class="downstream-stats">
                                 <table class="stats-table">
                                     <thead>
@@ -1513,7 +1530,6 @@
                 </div>
             `;
 
-
             // 渲染结果
             const positionsHtml = Object.entries(positions)
             .filter(([key]) => positionsToShow.has(key))
@@ -1527,86 +1543,92 @@
 
                 const isEuclid = positionInfo.is_brick === true;
 
+            // 准备 Euclid 下游机柜数据（用于弹窗）
+            const euclidDownstreamData = isEuclid && positionInfo.downstreamRacks ?
+                JSON.stringify({
+                    hostname: positionInfo.hostname || 'Unknown',
+                    room: positionInfo.room_name,
+                    position: positionInfo.name,
+                    downstreamRacks: positionInfo.downstreamRacks
+                }).replace(/'/g, '&#39;').replace(/"/g, '&quot;') : '';
+
                 return `
-            <div class="topo-item ${isEuclid ? 'euclid-brick' : ''}">
-                <div class="topo-item-header">
-                    <div class="position-info">
-                        <span class="status-indicator status-${positionInfo.status.toLowerCase() || 'unknown'}"></span>
-                        <span class="position-id">${positionInfo.room_name} ${positionInfo.name}</span>
-                        ${positionInfo.status === 'deployed' ?
-                    `<span class="rack-type">${positionInfo.type || 'Unknown'}</span>` :
-                ''
-            }
-                        ${positionInfo.power_redundancy ?
-                    `<span class="power-redundancy">(${positionInfo.power_redundancy})</span>` :
-                ''
-            }
-                        ${isEuclid ?
-                    `<span class="euclid-tag">
-                                ${positionInfo.deployed_asset_id ?
-                    `<a href="https://aha.bjs.aws-border.cn/host-monitoring/euclid/${positionInfo.deployed_asset_id}"
-                                        target="_blank"
-                                        class="euclid-link">Euclid</a>` :
-                'Euclid'
-            }
-                            </span>` :
-                ''
-            }
-                    </div>
-                    <div class="position-tags">
-                        <span class="filter-tag status-tag-${positionInfo.status.toLowerCase() || 'unknown'}">
-                            ${positionInfo.status || 'Unknown'}
-                        </span>
-                        <span class="filter-tag">Circuits: ${position.powerChains[0]?.circuit?.name === 'N/A' ? 0 : position.powerChains.length}</span>
-                        ${positionInfo.power_kva ?
-                    `<span class="filter-tag">Power: ${positionInfo.power_kva} kVA</span>` :
-                ''
-            }
-                    </div>
-                </div>
-                <div class="topo-item-content">
-                    ${position.powerChains.map(chain => `
-                        <div class="power-chain ${chain.powerFeed === 'N/A' ? 'power-chain-na' : `power-chain-${chain.powerFeed.toLowerCase()}`}">
-                            <div class="chain-header">
-                                ${chain.powerFeed === 'N/A' ? 'No Power Chain Data' : `Power Feed: ${chain.powerFeed}`}
+                        <div class="topo-item ${isEuclid ? 'euclid-brick' : ''}">
+                            <div class="topo-item-header">
+                                <div class="position-info">
+                                    <span class="status-indicator status-${positionInfo.status.toLowerCase() || 'unknown'}"></span>
+                                    <span class="position-id">${positionInfo.room_name} ${positionInfo.name}</span>
+                                    ${positionInfo.status === 'deployed' ?
+                                        `<span class="rack-type">${positionInfo.type || 'Unknown'}</span>` :
+                                        ''
+                                    }
+                                    ${positionInfo.power_redundancy ?
+                                        `<span class="power-redundancy">(${positionInfo.power_redundancy})</span>` :
+                                        ''
+                                    }
+                                    ${isEuclid ?
+                                        `<span class="euclid-tag clickable"
+                                               data-euclid-info="${euclidDownstreamData}"
+                                               title="Click to view downstream racks">
+                                            Euclid (${positionInfo.downstreamRacks?.length || 0})
+                                        </span>` :
+                                        ''
+                                    }
+                                </div>
+                                <div class="position-tags">
+                                    <span class="filter-tag status-tag-${positionInfo.status.toLowerCase() || 'unknown'}">
+                                        ${positionInfo.status || 'Unknown'}
+                                    </span>
+                                    <span class="filter-tag">Circuits: ${position.powerChains[0]?.circuit?.name === 'N/A' ? 0 : position.powerChains.length}</span>
+                                    ${positionInfo.power_kva ?
+                                        `<span class="filter-tag">Power: ${positionInfo.power_kva} kVA</span>` :
+                                        ''
+                                    }
+                                </div>
                             </div>
-                            <div class="chain-path">
-                                <div class="chain-item">
-                                    <div class="chain-label">Circuit</div>
-                                    <div class="chain-value">${chain.circuit.name}</div>
-                                </div>
-                                <div class="chain-arrow">→</div>
-                                <div class="chain-item">
-                                    <div class="chain-label">PDU</div>
-                                    <div class="chain-value">${chain.pdu.name}</div>
-                                </div>
-                                <div class="chain-arrow">→</div>
-                                <div class="chain-item">
-                                    <div class="chain-label">UPS</div>
-                                    <div class="chain-value">${chain.upsGroup}</div>
-                                </div>
-                                <div class="chain-arrow">→</div>
-                                <div class="chain-item">
-                                    <div class="chain-label">USB</div>
-                                    <div class="chain-value">${chain.usb}</div>
-                                </div>
-                                <div class="chain-arrow">→</div>
-                                <div class="chain-item">
-                                    <div class="chain-label">Transformer</div>
-                                    <div class="chain-value">${chain.routingInfo?.transformer || 'N/A'}</div>
-                                </div>
-                                <div class="chain-arrow">→</div>
-                                <div class="chain-item">
-                                    <div class="chain-label">Utility</div>
-                                    <div class="chain-value">${chain.routingInfo?.utility || 'N/A'}</div>
-                                </div>
+                            <div class="topo-item-content">
+                                ${position.powerChains.map(chain => `
+                                    <div class="power-chain ${chain.powerFeed === 'N/A' ? 'power-chain-na' : `power-chain-${chain.powerFeed.toLowerCase()}`}">
+                                        <div class="chain-header">
+                                            ${chain.powerFeed === 'N/A' ? 'No Power Chain Data' : `Power Feed: ${chain.powerFeed}`}
+                                        </div>
+                                        <div class="chain-path">
+                                            <div class="chain-item">
+                                                <div class="chain-label">Circuit</div>
+                                                <div class="chain-value">${chain.circuit.name}</div>
+                                            </div>
+                                            <div class="chain-arrow">→</div>
+                                            <div class="chain-item">
+                                                <div class="chain-label">PDU</div>
+                                                <div class="chain-value">${chain.pdu.name}</div>
+                                            </div>
+                                            <div class="chain-arrow">→</div>
+                                            <div class="chain-item">
+                                                <div class="chain-label">UPS</div>
+                                                <div class="chain-value">${chain.upsGroup}</div>
+                                            </div>
+                                            <div class="chain-arrow">→</div>
+                                            <div class="chain-item">
+                                                <div class="chain-label">USB</div>
+                                                <div class="chain-value">${chain.usb}</div>
+                                            </div>
+                                            <div class="chain-arrow">→</div>
+                                            <div class="chain-item">
+                                                <div class="chain-label">Transformer</div>
+                                                <div class="chain-value">${chain.routingInfo?.transformer || 'N/A'}</div>
+                                            </div>
+                                            <div class="chain-arrow">→</div>
+                                            <div class="chain-item">
+                                                <div class="chain-label">Utility</div>
+                                                <div class="chain-value">${chain.routingInfo?.utility || 'N/A'}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join('')}
                             </div>
                         </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-            }).join('');
+                    `;
+                }).join('');
 
             let contentContainer = topoView.querySelector('.content-container');
             if (!contentContainer) {
@@ -2105,179 +2127,339 @@
         `;
     }
 
+    function setupModalEvents() {
+        const modal = document.querySelector('.position-modal');
+        const backdrop = document.querySelector('.modal-backdrop');
 
-function setupModalEvents() {
-    const modal = document.querySelector('.position-modal');
-    const backdrop = document.querySelector('.modal-backdrop');
+        if (!modal || !backdrop) {
+            console.error('Modal elements not found');
+            return;
+        }
 
-    if (!modal || !backdrop) {
-        console.error('Modal elements not found');
-        return;
-    }
+        // 关闭弹窗的通用函数
+        const closeModal = () => {
+            modal.style.display = 'none';
+            backdrop.style.display = 'none';
+        };
 
-    EventHandlers.handleModalClose(modal, backdrop);
+        // 重置弹窗内容结构的函数
+        const resetModalContent = () => {
+            modal.querySelector('.modal-content').innerHTML = '<div class="position-list"></div>';
+        };
 
-    document.querySelectorAll('.stats-cell.clickable').forEach(cell => {
-        cell.addEventListener('click', () => {
-            try {
-                // 判断是主表格的单元格还是下游机柜的单元格
-                if (cell.dataset.type && cell.dataset.metric) {
-                    const type = cell.dataset.type;
-                    const metric = cell.dataset.metric;
-                    const positions = JSON.parse(cell.dataset.positions);
+        // 背景点击关闭
+        backdrop.addEventListener('click', closeModal);
 
-                    // 获取这些位置中的 Euclid positions
-                    const euclidPositions = positions.filter(position => {
-                        const matchingPosition = Object.entries(window.filteredPositions).find(([key, pos]) => {
-                            return pos.position === position && pos.type.toUpperCase() === type;
-                        });
-                        if (!matchingPosition) return false;
-                        const [positionKey] = matchingPosition;
-                        const posInfo = positionMap.get(positionKey);
-                        return posInfo?.is_brick === true;
-                    });
+        // ESC 键关闭
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.style.display === 'block') {
+                closeModal();
+            }
+        });
 
-                    // 生成包含 Euclid 标识的位置文本
-                    const positionsTextWithEuclid = positions
-                    .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
-                    .map(position => {
-                        const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
-                            return pos.position === position && pos.type.toUpperCase() === type;
-                        });
-                        if (!matchingPosition) return position;
-                        const [positionKey] = matchingPosition;
-                        const posInfo = positionMap.get(positionKey);
-                        return posInfo?.is_brick ? `${position}(Euclid)` : position;
-                    })
-                    .join('\n');
+        // 显示 Euclid 下游机柜弹窗的函数
+        const showEuclidModal = (euclidInfo) => {
+            const downstreamRacks = euclidInfo.downstreamRacks || [];
 
-                    modal.querySelector('.modal-header').innerHTML = `
-                <div class="modal-title">${type} - ${metric} (${positions.length} positions${
-                    euclidPositions.length > 0 ? `, ${euclidPositions.length} Euclid` : ''
-                    })</div>
+            // 生成复制文本
+            const copyText = [
+                `Euclid Brick: ${euclidInfo.hostname}`,
+                `Position: ${euclidInfo.room} ${euclidInfo.position}`,
+                `Downstream Racks (${downstreamRacks.length}):`,
+                '',
+                ...downstreamRacks
+                    .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
+                    .map(rack => `${rack.room} ${rack.position} | ${rack.rack_type || 'N/A'} | ${rack.fabric || 'N/A'} | Asset: ${rack.asset_id}`)
+            ].join('\n');
+
+            modal.querySelector('.modal-header').innerHTML = `
+                <div class="modal-title">
+                    <span class="euclid-modal-icon">🔷</span>
+                    Euclid Brick: ${euclidInfo.hostname}
+                </div>
                 <div class="modal-actions">
-                    <button id="copyPositionsBtn" class="copy-positions-button">
+                    <button class="copy-positions-button" data-copy-text="${encodeURIComponent(copyText)}">
                         <span class="export-icon">📋</span> Copy
                     </button>
                     <div class="modal-close">&times;</div>
                 </div>
             `;
 
-                        // 生成位置列表
+            modal.querySelector('.modal-content').innerHTML = `
+                <div class="euclid-modal-info">
+                    <div class="euclid-info-row">
+                        <span class="euclid-info-label">Brick Position:</span>
+                        <span class="euclid-info-value">${euclidInfo.room} ${euclidInfo.position}</span>
+                    </div>
+                    <div class="euclid-info-row">
+                        <span class="euclid-info-label">Downstream Racks:</span>
+                        <span class="euclid-info-value">${downstreamRacks.length}</span>
+                    </div>
+                </div>
+                <div class="euclid-downstream-table-container">
+                    <table class="euclid-downstream-table">
+                        <thead>
+                            <tr>
+                                <th>Position</th>
+                                <th>Rack Type</th>
+                                <th>Fabric</th>
+                                <th>Asset ID</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${downstreamRacks.length > 0 ?
+                                downstreamRacks
+                                    .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
+                                    .map(rack => `
+                                        <tr>
+                                            <td>${rack.room} ${rack.position}</td>
+                                            <td>${rack.rack_type || 'N/A'}</td>
+                                            <td>${rack.fabric || 'N/A'}</td>
+                                            <td>${rack.asset_id || 'N/A'}</td>
+                                        </tr>
+                                    `).join('') :
+                                `<tr><td colspan="4" class="no-data">No downstream racks found</td></tr>`
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            modal.style.display = 'block';
+            backdrop.style.display = 'block';
+        };
+
+        // 使用事件委托处理弹窗内的点击事件
+        modal.addEventListener('click', (e) => {
+            // 处理关闭按钮
+            if (e.target.classList.contains('modal-close')) {
+                closeModal();
+                return;
+            }
+
+            // 处理复制按钮
+            const copyBtn = e.target.closest('.copy-positions-button');
+            if (copyBtn) {
+                const copyText = decodeURIComponent(copyBtn.dataset.copyText || '');
+                if (copyText) {
+                    navigator.clipboard.writeText(copyText).then(() => {
+                        const originalHTML = copyBtn.innerHTML;
+                        copyBtn.innerHTML = '<span class="export-icon">✓</span> Copied!';
+                        copyBtn.classList.add('copied');
+                        setTimeout(() => {
+                            copyBtn.innerHTML = originalHTML;
+                            copyBtn.classList.remove('copied');
+                        }, 3000);
+                    }).catch(err => {
+                        console.error('Copy failed:', err);
+                    });
+                }
+                return;
+            }
+
+            // 处理弹窗内的 Euclid 标签点击
+            const euclidTag = e.target.closest('.euclid-indicator.clickable');
+            if (euclidTag && euclidTag.dataset.euclidInfo) {
+                try {
+                    const euclidInfo = JSON.parse(decodeURIComponent(euclidTag.dataset.euclidInfo));
+                    showEuclidModal(euclidInfo);
+                } catch (error) {
+                    console.error('Error parsing Euclid info:', error);
+                }
+                return;
+            }
+        });
+
+        // 处理 Summary Table 单元格点击
+        document.querySelectorAll('.stats-cell.clickable').forEach(cell => {
+            cell.addEventListener('click', () => {
+                try {
+                    // 先重置弹窗内容结构
+                    resetModalContent();
+
+                    if (cell.dataset.type && cell.dataset.metric) {
+                        // 主表格单元格处理
+                        const type = cell.dataset.type;
+                        const metric = cell.dataset.metric;
+                        const positions = JSON.parse(cell.dataset.positions);
+
+                        const euclidPositions = positions.filter(position => {
+                            const matchingPosition = Object.entries(window.filteredPositions).find(([key, pos]) => {
+                                return pos.position === position && pos.type.toUpperCase() === type;
+                            });
+                            if (!matchingPosition) return false;
+                            const [positionKey] = matchingPosition;
+                            const posInfo = positionMap.get(positionKey);
+                            return posInfo?.is_brick === true;
+                        });
+
+                        const positionsTextWithEuclid = positions
+                            .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
+                            .map(position => {
+                                const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
+                                    return pos.position === position && pos.type.toUpperCase() === type;
+                                });
+                                if (!matchingPosition) return position;
+                                const [positionKey] = matchingPosition;
+                                const posInfo = positionMap.get(positionKey);
+                                return posInfo?.is_brick ? `${position}(Euclid)` : position;
+                            })
+                            .join('\n');
+
+                        modal.querySelector('.modal-header').innerHTML = `
+                            <div class="modal-title">${type} - ${metric} (${positions.length} positions${
+                                euclidPositions.length > 0 ? `, ${euclidPositions.length} Euclid` : ''
+                            })</div>
+                            <div class="modal-actions">
+                                <button class="copy-positions-button" data-copy-text="${encodeURIComponent(positionsTextWithEuclid)}">
+                                    <span class="export-icon">📋</span> Copy
+                                </button>
+                                <div class="modal-close">&times;</div>
+                            </div>
+                        `;
+
                         modal.querySelector('.position-list').innerHTML = positions
                             .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
                             .map(position => {
-                            const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
-                                return pos.position === position && pos.type.toUpperCase() === type;
-                            });
+                                const matchingPosition = Object.entries(window.positions).find(([key, pos]) => {
+                                    return pos.position === position && pos.type.toUpperCase() === type;
+                                });
 
-                            if (!matchingPosition) return '';
+                                if (!matchingPosition) return '';
 
-                            const [positionKey] = matchingPosition;
-                            const posInfo = positionMap.get(positionKey);
-                            const isEuclid = posInfo?.is_brick === true;
-                            const deployedAssetId = posInfo?.deployed_asset_id;
+                                const [positionKey] = matchingPosition;
+                                const posInfo = positionMap.get(positionKey);
+                                const isEuclid = posInfo?.is_brick === true;
 
-                            return `
-                        <div class="position-item ${isEuclid ? 'euclid-position' : ''}">
-                            <span class="position-name">${position}</span>
-                            ${isEuclid ? `
-                                <span class="euclid-indicator">
-                                    ${deployedAssetId ?
-                                `<a href="https://aha.bjs.aws-border.cn/host-monitoring/euclid/${deployedAssetId}"
-                                            target="_blank"
-                                            class="euclid-link">Euclid</a>` :
-                            'Euclid'
-                        }
-                                </span>
-                            ` : ''}
-                        </div>
-                    `;
-                        })
+                                // 准备 Euclid 信息用于点击
+                                let euclidDataAttr = '';
+                                if (isEuclid && posInfo.downstreamRacks) {
+                                    const euclidInfo = {
+                                        hostname: posInfo.hostname || 'Unknown',
+                                        room: posInfo.room_name,
+                                        position: posInfo.name,
+                                        downstreamRacks: posInfo.downstreamRacks
+                                    };
+                                    euclidDataAttr = `data-euclid-info="${encodeURIComponent(JSON.stringify(euclidInfo))}"`;
+                                }
+
+                                return `
+                                    <div class="position-item ${isEuclid ? 'euclid-position' : ''}">
+                                        <span class="position-name">${position}</span>
+                                        ${isEuclid ?
+                                            `<span class="euclid-indicator clickable" ${euclidDataAttr} title="Click to view downstream racks">
+                                                Euclid (${posInfo.downstreamRacks?.length || 0})
+                                            </span>` :
+                                            ''
+                                        }
+                                    </div>
+                                `;
+                            })
                             .filter(html => html)
                             .join('');
 
-                        // 添加复制按钮的事件监听器
-                        const copyBtn = modal.querySelector('#copyPositionsBtn');
-                        if (copyBtn) {
-                            EventHandlers.handleCopyButton(copyBtn, positionsTextWithEuclid);
-                        }
-
                         modal.style.display = 'block';
                         backdrop.style.display = 'block';
+
                     } else if (cell.dataset.patchPositions) {
-                        // 处理 Patch rack 的点击
+                        // Patch rack 处理
                         const positions = JSON.parse(cell.dataset.patchPositions);
 
-                        // 生成包含房间号的位置文本
                         const positionsText = positions
-                        .sort((a, b) => {
-                            const aCompare = `${a.room} ${a.position}`;
-                            const bCompare = `${b.room} ${b.position}`;
-                            return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
-                        })
-                        .map(pos => `${pos.room} ${pos.position}`)
-                        .join('\n');
+                            .sort((a, b) => {
+                                const aCompare = `${a.room} ${a.position}`;
+                                const bCompare = `${b.room} ${b.position}`;
+                                return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
+                            })
+                            .map(pos => `${pos.room} ${pos.position}`)
+                            .join('\n');
 
                         modal.querySelector('.modal-header').innerHTML = `
-                    <div class="modal-title">Patch racks (${positions.length} positions)</div>
-                    <div class="modal-actions">
-                        <button id="copyPositionsBtn" class="copy-positions-button">
-                            <span class="export-icon">📋</span> Copy
-                        </button>
-                        <div class="modal-close">&times;</div>
-                    </div>
-                `;
+                            <div class="modal-title">Patch racks (${positions.length} positions)</div>
+                            <div class="modal-actions">
+                                <button class="copy-positions-button" data-copy-text="${encodeURIComponent(positionsText)}">
+                                    <span class="export-icon">📋</span> Copy
+                                </button>
+                                <div class="modal-close">&times;</div>
+                            </div>
+                        `;
 
                         modal.querySelector('.position-list').innerHTML = positions
                             .sort((a, b) => {
-                            const aCompare = `${a.room} ${a.position}`;
-                            const bCompare = `${b.room} ${b.position}`;
-                            return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
-                        })
+                                const aCompare = `${a.room} ${a.position}`;
+                                const bCompare = `${b.room} ${b.position}`;
+                                return String(aCompare).localeCompare(String(bCompare), undefined, {numeric: true});
+                            })
                             .map(position => `
-                        <div class="position-item">
-                            <span class="position-name">${position.room} ${position.position}</span>
-                        </div>
-                    `).join('');
-
-                        // 添加复制按钮的事件监听器
-                        const copyBtn = modal.querySelector('#copyPositionsBtn');
-                        if (copyBtn) {
-                            EventHandlers.handleCopyButton(copyBtn, positionsText);
-                        }
+                                <div class="position-item">
+                                    <span class="position-name">${position.room} ${position.position}</span>
+                                </div>
+                            `).join('');
 
                         modal.style.display = 'block';
                         backdrop.style.display = 'block';
-                    } else {
-                        // 下游机柜单元格处理逻辑
-                        const positions = JSON.parse(cell.dataset.positions || '[]');
+
+                    } else if (cell.dataset.positions) {
+                        // Network-connected rack 处理
+                        const positions = JSON.parse(cell.dataset.positions);
 
                         if (!positions.length) {
                             console.log('No downstream positions found');
                             return;
                         }
 
-                        modal.querySelector('.modal-title').textContent =
-                            `Network-connected racks (${positions.length} positions)`;
+                        const positionsText = positions
+                            .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
+                            .map(pos => `${pos.room} ${pos.position}`)
+                            .join('\n');
+
+                        modal.querySelector('.modal-header').innerHTML = `
+                            <div class="modal-title">Network-connected racks (${positions.length} positions)</div>
+                            <div class="modal-actions">
+                                <button class="copy-positions-button" data-copy-text="${encodeURIComponent(positionsText)}">
+                                    <span class="export-icon">📋</span> Copy
+                                </button>
+                                <div class="modal-close">&times;</div>
+                            </div>
+                        `;
 
                         modal.querySelector('.position-list').innerHTML = positions
                             .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
-                            .map(position => {
-                            return `
-                            <div class="position-item">
-                                <span class="position-name">${position.position}</span>
-                            </div>
-                        `;
-                        })
+                            .map(position => `
+                                <div class="position-item">
+                                    <span class="position-name">${position.room} ${position.position}</span>
+                                    ${position.rack_type ? `<span class="rack-type-tag">${position.rack_type}</span>` : ''}
+                                </div>
+                            `)
                             .join('');
-                    }
 
-                    modal.style.display = 'block';
-                    backdrop.style.display = 'block';
+                        modal.style.display = 'block';
+                        backdrop.style.display = 'block';
+                    }
 
                 } catch (error) {
                     console.error('Error handling cell click:', error);
+                }
+            });
+        });
+
+        // 处理页面上的 Euclid 标签点击（topo-item 中的）
+        document.querySelectorAll('.euclid-tag.clickable').forEach(tag => {
+            tag.addEventListener('click', (e) => {
+                e.stopPropagation(); // 阻止事件冒泡到 topo-item-header
+
+                try {
+                    const euclidInfo = JSON.parse(tag.dataset.euclidInfo.replace(/&quot;/g, '"').replace(/&#39;/g, "'"));
+
+                    if (!euclidInfo) {
+                        console.warn('No Euclid info found');
+                        return;
+                    }
+
+                    showEuclidModal(euclidInfo);
+
+                } catch (error) {
+                    console.error('Error handling Euclid tag click:', error);
                 }
             });
         });
@@ -3384,6 +3566,150 @@ height: 43px;
 
 .detail-title {
     margin-top: 30px;
+}
+
+/* Euclid 标签可点击样式 */
+.euclid-tag.clickable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.euclid-tag.clickable:hover {
+    background-color: #1565c0 !important;
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(33, 150, 243, 0.4);
+}
+
+/* Euclid 弹窗样式 */
+.euclid-modal-icon {
+    margin-right: 8px;
+}
+
+.euclid-modal-info {
+    background: #e3f2fd;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+
+.euclid-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(33, 150, 243, 0.2);
+}
+
+.euclid-info-row:last-child {
+    border-bottom: none;
+}
+
+.euclid-info-label {
+    font-weight: 600;
+    color: #1976d2;
+}
+
+.euclid-info-value {
+    font-weight: 500;
+    color: #333;
+}
+
+/* Euclid 下游机柜表格样式 */
+.euclid-downstream-table-container {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+}
+
+.euclid-downstream-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.euclid-downstream-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.euclid-downstream-table th {
+    background: #f5f5f5;
+    padding: 12px 10px;
+    text-align: left;
+    font-weight: 600;
+    color: #333;
+    border-bottom: 2px solid #e0e0e0;
+    white-space: nowrap;
+}
+
+.euclid-downstream-table td {
+    padding: 10px;
+    border-bottom: 1px solid #f0f0f0;
+    color: #555;
+}
+
+.euclid-downstream-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.euclid-downstream-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.euclid-downstream-table .no-data {
+    text-align: center;
+    color: #999;
+    font-style: italic;
+    padding: 30px;
+}
+
+/* 调整弹窗宽度以适应表格 */
+.position-modal {
+    min-width: 500px;
+    max-width: 800px;
+}
+
+/* Rack Type 标签样式 */
+.rack-type-tag {
+    font-size: 0.75em;
+    padding: 2px 6px;
+    background-color: #e8f5e9;
+    color: #2e7d32;
+    border-radius: 3px;
+    margin-left: 8px;
+}
+
+/* 滚动条样式 */
+.euclid-downstream-table-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.euclid-downstream-table-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+.euclid-downstream-table-container::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 3px;
+}
+
+.euclid-downstream-table-container::-webkit-scrollbar-thumb:hover {
+    background: #999;
+}
+
+/* Euclid 指示器可点击样式（弹窗内） */
+.euclid-indicator.clickable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.euclid-indicator.clickable:hover {
+    background-color: #1565c0 !important;
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(33, 150, 243, 0.4);
 }
 `);
 
