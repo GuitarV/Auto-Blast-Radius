@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.41
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -162,7 +162,7 @@
         const siteSection = document.createElement('div');
         siteSection.className = 'site-selection-section';
         siteSection.innerHTML = `
-            <h2>Select Data Center Site</h2>
+            <h2>Select Data Center Site V1.4</h2>
             <div class="custom-dropdown">
                 <div class="selected-option" tabindex="0">Select a Site</div>
                 <ul class="dropdown-options">
@@ -986,39 +986,49 @@
                 });
             });
 
-            // 应用筛选器
-            Object.entries(filters).forEach(([column, values]) => {
-                if (values && values.length > 0) {
-                    filteredData = filteredData.filter(item => {
-                        // 处理 rack type 和 status
-                        if (column === 'type' || column === 'status') {
-                            const positionKey = `${item['Position Room']}-${item['Position']}`;
-                            const posInfo = positionMap.get(positionKey);
-                            const value = column === 'type' ? posInfo?.type : posInfo?.status;
-                            return values.includes(value);
-                        }
-                        // 处理 power_kva（Capacity）
-                        else if (column === 'power_kva') {
-                            const positionKey = `${item['Position Room']}-${item['Position']}`;
-                            const posInfo = positionMap.get(positionKey);
-                            const capacityValue = posInfo?.power_kva;
-                            return values.some(value => parseFloat(value) === capacityValue);
-                        }
-                        // 处理 transformer 和 utility
-                        else if (column === 'routingInfo.transformer' || column === 'routingInfo.utility') {
-                            const routingValue = column === 'routingInfo.transformer' ?
-                                  item.routingInfo?.transformer :
-                            item.routingInfo?.utility;
-                            return values.some(value => String(routingValue || '').trim() === String(value).trim());
-                        }
-                        // 处理其他普通字段
-                        else {
-                            const itemValue = String(item[column] || '').trim();
-                            return values.some(value => String(value).trim() === itemValue);
-                        }
-                    });
+            // 检查是否有任何筛选条件
+            const hasFilters = Object.values(filters).some(values => values && values.length > 0);
+
+            // 辅助函数：检查单个条件是否匹配
+            const checkCondition = (item, column, values) => {
+                // 处理 rack type 和 status
+                if (column === 'type' || column === 'status') {
+                    const positionKey = `${item['Position Room']}-${item['Position']}`;
+                    const posInfo = positionMap.get(positionKey);
+                    const value = column === 'type' ? posInfo?.type : posInfo?.status;
+                    return values.includes(value);
                 }
-            });
+                // 处理 power_kva（Capacity）
+                else if (column === 'power_kva') {
+                    const positionKey = `${item['Position Room']}-${item['Position']}`;
+                    const posInfo = positionMap.get(positionKey);
+                    const capacityValue = posInfo?.power_kva;
+                    return values.some(value => parseFloat(value) === capacityValue);
+                }
+                // 处理 transformer 和 utility
+                else if (column === 'routingInfo.transformer' || column === 'routingInfo.utility') {
+                    const routingValue = column === 'routingInfo.transformer' ?
+                        item.routingInfo?.transformer :
+                        item.routingInfo?.utility;
+                    return values.some(value => String(routingValue || '').trim() === String(value).trim());
+                }
+                // 处理其他普通字段
+                else {
+                    const itemValue = String(item[column] || '').trim();
+                    return values.some(value => String(value).trim() === itemValue);
+                }
+            };
+
+            // 应用筛选器 - OR 关系（任一筛选器匹配即可）
+            if (hasFilters) {
+                filteredData = EXCEL_DATA.filter(item => {
+                    // 遍历所有筛选器，任一匹配即返回 true
+                    return Object.entries(filters).some(([column, values]) => {
+                        if (!values || values.length === 0) return false;
+                        return checkCondition(item, column, values);
+                    });
+                });
+            }
 
             // 创建受影响的circuit集合
             const affectedCircuits = new Set(
