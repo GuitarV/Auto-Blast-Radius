@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.5
+// @version      1.51
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -23,6 +23,7 @@
 // @connect      idp.amazon.com
 // @connect      *.aws-border.cn
 // @connect      *.amazon.com
+// @connect      s3.amazonaws.com
 // @connect      ncfs-api.corp.amazon.com
 // @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
 // @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
@@ -64,6 +65,7 @@
         }
     };
 
+    let SELECTED_SITE = '';
     let EXCEL_DATA = [];
     let positionMap = new Map();
     window.filteredPositions = {};
@@ -89,9 +91,9 @@
         const siteSection = document.createElement('div');
         siteSection.className = 'site-selection-section';
         siteSection.innerHTML = `
-            <h2>Select Data Center Site (V1.5)</h2>
+            <h2>Select Data Center Site</h2>
             <div class="custom-dropdown">
-                <div class="selected-option" tabindex="0">Select a Site</div>
+                <div class="selected-option" tabindex="0">Select a Site(V1.51)</div>
                 <ul class="dropdown-options">
                     ${AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
                 </ul>
@@ -187,6 +189,7 @@
         optionsList.addEventListener('click', async (event) => {
             if (event.target.tagName === 'LI') {
                 const selectedSite = event.target.getAttribute('data-value');
+                SELECTED_SITE = selectedSite;
                 selectedOption.textContent = selectedSite;
                 optionsList.style.display = 'none';
 
@@ -217,7 +220,7 @@
                     EXCEL_DATA = data;
 
                     updateProgress(40, 'Getting position site...');
-                    const site = getPositionSite(EXCEL_DATA);
+                    const site = getPositionSite(EXCEL_DATA, selectedSite);
 
                     updateProgress(50, 'Fetching position info (Maybe 1-2 mins🤔)...');
                     positionMap = await fetchPositionInfo(site);
@@ -390,20 +393,17 @@
                     "Accept": "application/json",
                     "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiYmpzZGNlbyIsInR5cGUiOiJwZXJtYW5lbnQifQ.mKaIWhj_d7kxB8fwh2BDDGKMyVLrkiwZZzuZzc8ra6s",
                 },
-                data: JSON.stringify({ site: site, cluster:'bjs' }),
+                data: JSON.stringify({ site: site, cluster: 'bjs' }),
                 onload: function(response) {
                     console.log('[LoadData] Response received');
                     console.log('[LoadData] Status:', response.status);
                     console.log('[LoadData] Status Text:', response.statusText);
-                    console.log('[LoadData] Response headers:', response.responseHeaders);
-                    console.log('[LoadData] Response text length:', response.responseText ? response.responseText.length : 0);
-                    console.log('[LoadData] Response text preview (first 500 chars):',
-                        response.responseText ? response.responseText.substring(0, 500) : 'empty');
 
                     try {
                         if (response.status === 200) {
                             console.log('[LoadData] Status 200 OK, parsing response...');
 
+                            // Parse JSON response
                             let responseData;
                             try {
                                 responseData = JSON.parse(response.responseText);
@@ -411,137 +411,166 @@
                                 console.log('[LoadData] Response data keys:', Object.keys(responseData));
                             } catch (jsonError) {
                                 console.error('[LoadData] JSON parse error:', jsonError);
-                                console.error('[LoadData] Raw response:', response.responseText);
                                 reject(new Error(`JSON parse error: ${jsonError.message}`));
                                 return;
                             }
 
-                            // 获取数据
-                            let primaryRaw, secondaryRaw;
-
-                            console.log('[LoadData] Checking response structure...');
-                            console.log('[LoadData] Has body?', !!responseData.body);
-                            console.log('[LoadData] Body type:', typeof responseData.body);
-
+                            // ========== 改动开始 ==========
+                            // 从响应中提取预签名 URL
+                            let bodyData;
                             if (responseData.body) {
-                                console.log('[LoadData] Parsing body...');
-                                let bodyData;
                                 try {
                                     bodyData = typeof responseData.body === 'string' ?
                                         JSON.parse(responseData.body) : responseData.body;
-                                    console.log('[LoadData] Body parsed, keys:', Object.keys(bodyData));
                                 } catch (bodyError) {
                                     console.error('[LoadData] Body parse error:', bodyError);
-                                    console.error('[LoadData] Body content:', responseData.body);
                                     reject(new Error(`Body parse error: ${bodyError.message}`));
                                     return;
                                 }
-                                primaryRaw = bodyData.primary_data;
-                                secondaryRaw = bodyData.secondary_data;
                             } else {
-                                console.log('[LoadData] No body wrapper, using direct data');
-                                primaryRaw = responseData.primary_data;
-                                secondaryRaw = responseData.secondary_data;
+                                bodyData = responseData;
                             }
 
-                            console.log('[LoadData] Primary data type:', typeof primaryRaw);
-                            console.log('[LoadData] Primary data is array:', Array.isArray(primaryRaw));
-                            console.log('[LoadData] Secondary data type:', typeof secondaryRaw);
-                            console.log('[LoadData] Secondary data is array:', Array.isArray(secondaryRaw));
+                            const primaryUrl = bodyData.primary_url;
+                            const secondaryUrl = bodyData.secondary_url;
 
-                            if (typeof primaryRaw === 'string') {
-                                console.log('[LoadData] Primary data preview (first 300 chars):',
-                                    primaryRaw.substring(0, 300));
-                            } else if (Array.isArray(primaryRaw)) {
-                                console.log('[LoadData] Primary data length:', primaryRaw.length);
-                                if (primaryRaw.length > 0) {
-                                    console.log('[LoadData] Primary first item:', primaryRaw[0]);
-                                }
-                            }
-
-                            // 判断数据类型并解析
-                            let primaryData, secondaryData;
-
-                            if (typeof primaryRaw === 'string') {
-                                console.log('[LoadData] Parsing as CSV format...');
-                                primaryData = parseCSVContent(primaryRaw);
-                                secondaryData = parseCSVContent(secondaryRaw || '');
-                            } else if (Array.isArray(primaryRaw)) {
-                                console.log('[LoadData] Using as JSON array format...');
-                                primaryData = primaryRaw;
-                                secondaryData = secondaryRaw || [];
-                            } else {
-                                console.error('[LoadData] Unknown data format');
-                                console.error('[LoadData] primaryRaw:', primaryRaw);
-                                reject(new Error('Unknown data format'));
+                            if (!primaryUrl) {
+                                console.error('[LoadData] No primary_url in response');
+                                reject(new Error(`No primary URL available for site ${site}`));
                                 return;
                             }
 
-                            console.log('[LoadData] Final primary data count:', primaryData ? primaryData.length : 0);
-                            console.log('[LoadData] Final secondary data count:', secondaryData ? secondaryData.length : 0);
+                            console.log('[LoadData] Got presigned URLs, fetching CSV data...');
 
-                            if (!primaryData || primaryData.length === 0) {
-                                console.error('[LoadData] No primary data after parsing');
-                                reject(new Error(`No primary data available for site ${site}`));
-                                return;
-                            }
-
-                            // 创建路由映射
-                            console.log('[LoadData] Creating routing map...');
-                            const routingMap = createUPSRoutingMap(secondaryData);
-
-                            // 处理数据
-                            console.log('[LoadData] Enriching data with routing info...');
-                            const enrichedData = primaryData.map((item, index) => {
-                                if (index === 0) {
-                                    console.log('[LoadData] Processing first item:', item);
-                                }
-
-                                const cleanedItem = {
-                                    'Position Site': item['Position Site'] || site,
-                                    'Position Room': item['Position Room'] || 'Unknown',
-                                    'Position': item['Position'] || 'Unknown',
-                                    'Circuit Name': item['Circuit Name'] || 'Unknown',
-                                    'Circuit Number': item['Circuit Number'] || 'Unknown',
-                                    'PDU Name': item['PDU Name'] || 'Unknown',
-                                    'PDU Type': item['PDU Type'] || 'Unknown',
-                                    'UPS Group': item['UPS Group'] || 'Unknown',
-                                    'USB': item['USB'] || 'Unknown',
-                                    'Power Feed': item['Power Feed'] || 'Unknown',
-                                    ...item
-                                };
-
-                                let routingInfo = cleanedItem.USB ?
-                                    routingMap.usbMap.get(cleanedItem.USB) : null;
-
-                                if (!routingInfo && cleanedItem['UPS Group']) {
-                                    routingInfo = routingMap.upsGroupMap.get(cleanedItem['UPS Group']);
-                                }
-
-                                if (!routingInfo) {
-                                    routingInfo = { transformer: 'Unknown', utility: 'Unknown' };
-                                }
-
-                                return { ...cleanedItem, routingInfo };
+                            // 用预签名 URL 获取主文件 CSV
+                            const fetchPrimary = new Promise((res, rej) => {
+                                GM_xmlhttpRequest({
+                                    method: "GET",
+                                    url: primaryUrl,
+                                    onload: (r) => {
+                                        if (r.status === 200) {
+                                            console.log('[LoadData] Primary CSV fetched successfully');
+                                            let text = r.responseText;
+                                            if (text.charCodeAt(0) === 0xFEFF) {
+                                                text = text.slice(1);
+                                            }
+                                            res(text);
+                                        } else {
+                                            rej(new Error(`Failed to fetch primary CSV: ${r.status}`));
+                                        }
+                                    },
+                                    onerror: (e) => rej(new Error(`Network error fetching primary CSV: ${e}`)),
+                                    ontimeout: () => rej(new Error('Timeout fetching primary CSV'))
+                                });
                             });
 
-                            console.log('[LoadData] Enriched data count:', enrichedData.length);
-                            if (enrichedData.length > 0) {
-                                console.log('[LoadData] First enriched item:', enrichedData[0]);
-                            }
+                            // 用预签名 URL 获取副文件 CSV（可选）
+                            const fetchSecondary = secondaryUrl ? new Promise((res, rej) => {
+                                GM_xmlhttpRequest({
+                                    method: "GET",
+                                    url: secondaryUrl,
+                                    onload: (r) => {
+                                        if (r.status === 200) {
+                                            console.log('[LoadData] Secondary CSV fetched successfully');
+                                            let text = r.responseText;
+                                            if (text.charCodeAt(0) === 0xFEFF) {
+                                                text = text.slice(1);
+                                            }
+                                            res(text);
+                                        } else {
+                                            console.warn('[LoadData] Secondary CSV fetch failed:', r.status);
+                                            res(''); // 副文件失败不阻断流程
+                                        }
+                                    },
+                                    onerror: () => res(''),
+                                    ontimeout: () => res('')
+                                });
+                            }) : Promise.resolve('');
 
-                            console.log('[LoadData] SUCCESS - Resolving with data');
-                            console.log('========================================');
-                            resolve(enrichedData);
+                            Promise.all([fetchPrimary, fetchSecondary]).then(([primaryRaw, secondaryRaw]) => {
+                            // ========== 改动结束 ==========
+
+                                // 以下逻辑与原版完全一致，未做任何修改
+                                let primaryData, secondaryData;
+
+                                if (typeof primaryRaw === 'string') {
+                                    console.log('[LoadData] Parsing as CSV format...');
+                                    primaryData = parseCSVContent(primaryRaw);
+                                    secondaryData = parseCSVContent(secondaryRaw || '');
+                                } else if (Array.isArray(primaryRaw)) {
+                                    console.log('[LoadData] Using as JSON array format...');
+                                    primaryData = primaryRaw;
+                                    secondaryData = secondaryRaw || [];
+                                } else {
+                                    console.error('[LoadData] Unknown data format');
+                                    reject(new Error('Unknown data format'));
+                                    return;
+                                }
+
+                                console.log('[LoadData] Final primary data count:', primaryData ? primaryData.length : 0);
+                                console.log('[LoadData] Final secondary data count:', secondaryData ? secondaryData.length : 0);
+
+                                if (!primaryData || primaryData.length === 0) {
+                                    console.error('[LoadData] No primary data after parsing');
+                                    reject(new Error(`No primary data available for site ${site}`));
+                                    return;
+                                }
+
+                                // Create UPS routing map from secondary data
+                                console.log('[LoadData] Creating routing map...');
+                                const routingMap = createUPSRoutingMap(secondaryData);
+
+                                // Enrich primary data with routing information
+                                console.log('[LoadData] Enriching data with routing info...');
+                                const enrichedData = primaryData.map((item, index) => {
+                                    if (index === 0) {
+                                        console.log('[LoadData] Processing first item:', item);
+                                    }
+
+                                    const cleanedItem = {
+                                        'Position Site': item['Position Site'] || site,
+                                        'Position Room': item['Position Room'] || 'Unknown',
+                                        'Position': item['Position'] || 'Unknown',
+                                        'Circuit Name': item['Circuit Name'] || 'Unknown',
+                                        'Circuit Number': item['Circuit Number'] || 'Unknown',
+                                        'PDU Name': item['PDU Name'] || 'Unknown',
+                                        'PDU Type': item['PDU Type'] || 'Unknown',
+                                        'UPS Group': item['UPS Group'] || 'Unknown',
+                                        'USB': item['USB'] || 'Unknown',
+                                        'Power Feed': item['Power Feed'] || 'Unknown',
+                                        ...item
+                                    };
+
+                                    let routingInfo = cleanedItem.USB ?
+                                        routingMap.usbMap.get(cleanedItem.USB) : null;
+
+                                    if (!routingInfo && cleanedItem['UPS Group']) {
+                                        routingInfo = routingMap.upsGroupMap.get(cleanedItem['UPS Group']);
+                                    }
+
+                                    if (!routingInfo) {
+                                        routingInfo = { transformer: 'Unknown', utility: 'Unknown' };
+                                    }
+
+                                    return { ...cleanedItem, routingInfo };
+                                });
+
+                                console.log('[LoadData] Enriched data count:', enrichedData.length);
+                                console.log('[LoadData] SUCCESS - Resolving with data');
+                                console.log('========================================');
+                                resolve(enrichedData);
+
+                            }).catch(err => {
+                                console.error('[LoadData] Error fetching CSV from presigned URLs:', err);
+                                reject(err);
+                            });
 
                         } else {
                             console.error('[LoadData] Non-200 status:', response.status);
-                            console.error('[LoadData] Response text:', response.responseText);
                             reject(new Error(`Failed to load data for ${site} (Status: ${response.status})`));
                         }
                     } catch (error) {
                         console.error('[LoadData] Catch block error:', error);
-                        console.error('[LoadData] Error stack:', error.stack);
                         reject(new Error(`Unable to process data for ${site}: ${error.message}`));
                     }
                 },
@@ -766,9 +795,9 @@
         }
     }
 
-    function getPositionSite(data) {
+    function getPositionSite(data, fallbackSite) {
         if (!Array.isArray(data) || data.length === 0) throw new Error('Invalid data');
-        const positionSite = data[0]['Position Site'];
+        const positionSite = data['Position Site'] || data['\uFEFFPosition Site'] || fallbackSite;
         if (!positionSite) throw new Error('Position Site not found');
         return positionSite;
     }
@@ -1027,7 +1056,7 @@
             const positions = {};
             Array.from(positionMap.entries()).forEach(([positionKey, posInfo]) => {
                 positions[positionKey] = {
-                    site: getPositionSite(EXCEL_DATA), room: posInfo.room_name, position: posInfo.name,
+                    site: getPositionSite(EXCEL_DATA, SELECTED_SITE), room: posInfo.room_name, position: posInfo.name,
                     status: posInfo.status || 'unknown', type: (posInfo.type || 'unknown').toUpperCase(),
                     power_kva: posInfo.power_kva, power_redundancy: posInfo.power_redundancy,
                     powerChains: [], affectedPowerChains: []
