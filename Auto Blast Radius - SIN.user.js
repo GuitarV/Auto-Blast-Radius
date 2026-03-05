@@ -87,7 +87,7 @@
     const LAMBDA_URL = 'https://twuukpz75g.execute-api.us-west-2.amazonaws.com/default/GetS3Data';
 
     const AVAILABLE_SITES = [
-        'SIN2', 'SIN3', 'SIN4', 'SIN51', 'SIN52', 'SIN53', 'SIN58',
+        'SIN2', 'SIN3', 'SIN4', 'SIN51', 'SIN52', 'SIN53', 'SIN54', 'SIN58',
         'SIN62', 'SIN63', 'SIN64', 'SIN65', 'SIN66', 'SIN69',
         'SIN78', 'SIN79', 'SIN81',
     ];
@@ -382,9 +382,9 @@
             </div>
             <div class="tips-content">
                 <ul class="tips-list">
-                    <li><strong>Summary Table：</strong>目前表格中只统计Deployed状态的机柜，Patch Rack不计入其中</li>
-                    <li><strong>Detail Info：</strong>已自动过滤Floorplan中的Non-rack和Mini-rack位置</li>
-                    <li><strong>点击查看：</strong>点击Summary Table中的数字可查看详细机柜列表</li>
+                    <li><strong>Summary Table：</strong>Currently, the table only includes deployed racks; Patch racks are excluded.</li>
+                    <li><strong>Detail Info：</strong>Non-rack and Mini-rack locations have been automatically filtered from the floorplan.</li>
+                    <li><strong>Click to view：</strong>Click cells in the Summary Table to view detailed rack listings.</li>
                 </ul>
             </div>
         `;
