@@ -328,9 +328,9 @@
         const siteSection = document.createElement('div');
         siteSection.className = 'site-selection-section';
         siteSection.innerHTML = `
-            <h2>Select Data Center Site</h2>
+            <h2>Select Data Center Site (v1.52)</h2>
             <div class="custom-dropdown">
-                <div class="selected-option" tabindex="0">Select a Site (v1.52)</div>
+                <div class="selected-option" tabindex="0">Select a Site</div>
                 <ul class="dropdown-options">
                     ${AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
                 </ul>
