@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius - SIN
 // @namespace    http://tampermonkey.net/
-// @version      1.51
+// @version      1.52
 // @author       xiongwev
 // @description  Display datacenter rack topology with S3 file management
 // @match        https://w.amazon.com/bin/view/SIN_colo_dceo/AutoBlastRadius*
@@ -87,7 +87,7 @@
     const LAMBDA_URL = 'https://twuukpz75g.execute-api.us-west-2.amazonaws.com/default/GetS3Data';
 
     const AVAILABLE_SITES = [
-        'SIN2', 'SIN3', 'SIN4', 'SIN51', 'SIN52', 'SIN53', 'SIN54', 'SIN58',
+        'SIN2', 'SIN3', 'SIN4', 'SIN50', 'SIN51', 'SIN52', 'SIN53', 'SIN54', 'SIN58',
         'SIN62', 'SIN63', 'SIN64', 'SIN65', 'SIN66', 'SIN69',
         'SIN78', 'SIN79', 'SIN81',
     ];
@@ -330,7 +330,7 @@
         siteSection.innerHTML = `
             <h2>Select Data Center Site</h2>
             <div class="custom-dropdown">
-                <div class="selected-option" tabindex="0">Select a Site</div>
+                <div class="selected-option" tabindex="0">Select a Site (v1.52)</div>
                 <ul class="dropdown-options">
                     ${AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
                 </ul>
