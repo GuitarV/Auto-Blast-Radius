@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.51
+// @version      1.53
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -1361,7 +1361,7 @@
                     </div>
                 </div>
                 <div class="export-button-container">
-                    <button id="exportStatsBtn" class="export-button"><span class="export-icon">📋</span> Copy</button>
+                    <button id="exportStatsBtn" class="copy-positions-button"><span class="export-icon">📋</span> Copy</button>
                 </div>
             </div>`;
 
@@ -1487,11 +1487,28 @@
         const exportBtn = document.getElementById('exportStatsBtn');
         if (exportBtn) {
             exportBtn.addEventListener('click', () => {
-                const activeRackTypes = Object.keys(window.positions ?
-                    [...new Set(Object.values(window.positions).map(p => p.type.toUpperCase()))] : []);
-                let markdown = `| Power Status | ${activeRackTypes.join(' | ')} | Total |\n`;
-                markdown += `|${'-'.repeat(13)}|${activeRackTypes.map(() => '-'.repeat(10)).join('|')}|${'-'.repeat(10)}|\n`;
-
+                // 获取当前显示的统计表格数据
+                const statsTable = document.querySelector('.stats-details .stats-table');
+                if (!statsTable) return;
+    
+                // 提取表头
+                const headers = Array.from(statsTable.querySelectorAll('thead th')).map(th => th.textContent.trim());
+    
+                // 提取数据行
+                const rows = Array.from(statsTable.querySelectorAll('tbody tr')).map(tr => {
+                    return Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim());
+                });
+    
+                // 生成 Markdown 表格
+                let markdown = `| ${headers.join(' | ')} |
+    `;
+                markdown += `|${headers.map(() => '---').join('|')}|
+    `;
+                rows.forEach(row => {
+                    markdown += `| ${row.join(' | ')} |
+    `;
+                });
+    
                 navigator.clipboard.writeText(markdown).then(() => {
                     exportBtn.innerHTML = '<span class="export-icon">✓</span> Copied!';
                     exportBtn.classList.add('copied');
@@ -1499,6 +1516,9 @@
                         exportBtn.innerHTML = '<span class="export-icon">📋</span> Copy';
                         exportBtn.classList.remove('copied');
                     }, 3000);
+                }).catch(err => {
+                    console.error('Failed to copy:', err);
+                    alert('复制失败，请重试');
                 });
             });
         }
