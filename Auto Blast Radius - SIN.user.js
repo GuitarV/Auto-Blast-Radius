@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius - SIN
 // @namespace    http://tampermonkey.net/
-// @version      1.52
+// @version      1.53
 // @author       xiongwev
 // @description  Display datacenter rack topology with S3 file management
 // @match        https://w.amazon.com/bin/view/SIN_colo_dceo/AutoBlastRadius*
@@ -328,7 +328,7 @@
         const siteSection = document.createElement('div');
         siteSection.className = 'site-selection-section';
         siteSection.innerHTML = `
-            <h2>Select Data Center Site (v1.52)</h2>
+            <h2>Select Data Center Site (v1.53)</h2>
             <div class="custom-dropdown">
                 <div class="selected-option" tabindex="0">Select a Site</div>
                 <ul class="dropdown-options">
@@ -1665,7 +1665,7 @@
                     </div>
                 </div>
                 <div class="export-button-container">
-                    <button id="exportStatsBtn" class="export-button"><span class="export-icon">📋</span> Copy</button>
+                    <button id="exportStatsBtn" class="copy-positions-button"><span class="export-icon">📋</span> Copy</button>
                 </div>
             </div>`;
 
@@ -1786,16 +1786,33 @@
             });
         });
     }
-
+    
     function setupExportButton() {
         const exportBtn = document.getElementById('exportStatsBtn');
         if (exportBtn) {
             exportBtn.addEventListener('click', () => {
-                const activeRackTypes = Object.keys(window.positions ?
-                    [...new Set(Object.values(window.positions).map(p => p.type.toUpperCase()))] : []);
-                let markdown = `| Power Status | ${activeRackTypes.join(' | ')} | Total |\n`;
-                markdown += `|${'-'.repeat(13)}|${activeRackTypes.map(() => '-'.repeat(10)).join('|')}|${'-'.repeat(10)}|\n`;
-
+                // 获取当前显示的统计表格数据
+                const statsTable = document.querySelector('.stats-details .stats-table');
+                if (!statsTable) return;
+    
+                // 提取表头
+                const headers = Array.from(statsTable.querySelectorAll('thead th')).map(th => th.textContent.trim());
+    
+                // 提取数据行
+                const rows = Array.from(statsTable.querySelectorAll('tbody tr')).map(tr => {
+                    return Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim());
+                });
+    
+                // 生成 Markdown 表格
+                let markdown = `| ${headers.join(' | ')} |
+    `;
+                markdown += `|${headers.map(() => '---').join('|')}|
+    `;
+                rows.forEach(row => {
+                    markdown += `| ${row.join(' | ')} |
+    `;
+                });
+    
                 navigator.clipboard.writeText(markdown).then(() => {
                     exportBtn.innerHTML = '<span class="export-icon">✓</span> Copied!';
                     exportBtn.classList.add('copied');
@@ -1803,10 +1820,14 @@
                         exportBtn.innerHTML = '<span class="export-icon">📋</span> Copy';
                         exportBtn.classList.remove('copied');
                     }, 3000);
+                }).catch(err => {
+                    console.error('Failed to copy:', err);
+                    alert('Failed to copy，please retry');
                 });
             });
         }
     }
+
 
     // ==================== Part 4b 开始 ====================
 
