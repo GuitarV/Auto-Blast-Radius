@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.53
+// @version      1.6
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -24,6 +24,7 @@
 // @connect      *.aws-border.cn
 // @connect      *.amazon.com
 // @connect      s3.amazonaws.com
+// @connect      nova.amazon.com
 // @connect      ncfs-api.corp.amazon.com
 // @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
 // @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
@@ -65,17 +66,91 @@
         }
     };
 
+    const CONFIG = {
+        // 版本信息
+        VERSION: '1.6',
+        CLUSTER:'bjs',
+
+        // API 端点配置
+        API_ENDPOINTS: {
+            LAMBDA_URL: 'https://twuukpz75g.execute-api.us-west-2.amazonaws.com/default/GetS3Data',
+        },
+
+        // 认证配置
+        AUTH: {
+            BEARER_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiYmpzZGNlbyIsInR5cGUiOiJwZXJtYW5lbnQifQ.mKaIWhj_d7kxB8fwh2BDDGKMyVLrkiwZZzuZzc8ra6s'
+        },
+
+        // Nova AI 配置
+        NOVA_API: {
+            API_KEY: '0aa6b5ea-313b-4bde-8646-e8d385ef681e',
+            BASE_URL: 'https://api.nova.amazon.com/v1',
+            MODEL: 'nova-2-lite-v1',
+            TEMPERATURE: 0.3,
+            MAX_TOKENS: 3000
+        },
+
+        // 站点列表配置
+        AVAILABLE_SITES: [
+            'BJS9', 'BJS10', 'BJS11', 'BJS12', 'BJS20', 'BJS50', 'BJS51',
+            'BJS52', 'BJS60', 'BJS70', 'BJS71', 'BJS73', 'BJS74',
+            'BJS80', 'PEK7', 'PEK50', 'PKX140'
+        ],
+
+        // 筛选器选项配置
+        FILTER_OPTIONS: [
+            { label: 'Data Hall', column: 'Position Room' },
+            { label: 'Rack', column: 'Position', isPosition: true },
+            { label: 'PDU Name', column: 'PDU Name' },
+            { label: 'UPS Group', column: 'UPS Group' },
+            { label: 'USB', column: 'USB' },
+            { label: 'Transformer', column: 'routingInfo.transformer' },
+            { label: 'Utility', column: 'routingInfo.utility' },
+            { label: 'Power Feed', column: 'Power Feed' },
+            { label: 'Rack Status', column: 'status' },
+            { label: 'Rack Type', column: 'type' },
+            { label: 'Capacity', column: 'power_kva' }
+        ],
+
+        // 显示名称映射
+        DISPLAY_NAMES: {
+            'Lost Primary': 'At Risk - Primary Loss',
+            'Lost Secondary': 'At Risk - Secondary Loss',
+            'Partial Power Loss': 'At Risk - Partial Loss',
+            'Complete Power Loss': 'At Risk - Complete Loss'
+        },
+
+        // 机柜类型映射
+        RACK_TYPE_MAPPING: {
+                'NETWORK': 'Network', 'Security': 'Network', 'Fusion Even Prim': 'Network', 'Fusion Odd Prim': 'Network',
+                'Network Core - W': 'Network', 'Network Core - E': 'Network', 'BMS': 'Network', 'Network Edge': 'Network',
+                'AGG - EC2': 'Network', 'CHRONOS': 'Network', 'UMN': 'Network', 'Network Border': 'Network',
+                'Network Core': 'Network', 'Network Enterpri': 'Network', 'Network Manageme': 'Network',
+                'Network L7 - JLB': 'Network', 'Network Buffer': 'Network', 'Network Optical': 'Network',
+                'Network Aggregat': 'Network', 'Network VPC-DX': 'Network', 'Network Catzilla': 'Network',
+                'Network L7': 'Network', 'Network CI': 'Network', 'Network Enterprise': 'Network', 'Network Build': 'Network',
+                '12.8T ES BFC SP': 'Network', '12.8T BFC BR': 'Network', '12.8T ES EUC SP': 'Network', 'Fission': 'Network',
+                'WS BFC BR': 'Network', 'ES BFC SP': 'Network', 'AGG - PROD': 'Network', 'AGG-PROD': 'Network',
+                'Agg - Prod': 'Network', 'AGG - Prod': 'Network', 'AGG-EC2': 'Network', 'Agg - EC2': 'Network',
+                'PATO': 'Network', 'CI/NVR': 'Network', 'BFC BR': 'Network', 'Border': 'Network', 'Optical': 'Network',
+                'VPC': 'Network', 'STORM': 'Network', 'ES EUC SP': 'Network', 'ES BFC BR': 'Network', 'WS EUC SP': 'Network',
+                'WS BFC SP': 'Network', 'LBIR': 'Network', 'Fusion Secondary': 'Network', 'CI': 'Network',
+                'WS UMN': 'Network', 'ES UMN': 'Network', 'L7-JLB': 'Network', 'WMW Puffin Med': 'Network',
+                'IRON RACK': 'Network', 'Data Center Oper': 'Network', 'Bulk Fiber': 'Network', 'CloudFront': 'Network',
+                'Edge': 'Network', 'Corp': 'Network', 'DCO': 'Network', 'FPOD': 'Network', 'Migration Prog': 'Network',
+                'EC2': 'EC2', 'Enterprise': 'EC2', 'S3': 'EC2', 'EBS': 'EBS',
+                'Production': 'Production', 'AWS Prod': 'Production', 'AWS-Prod': 'Production', 'Bering Rack': 'Production',
+                'Bering Tape Rack': 'Production', 'SERVER': 'Production', 'Classic-Prod': 'Production',
+                'Classic Prod': 'Production', 'GPS': 'Production', 'AWS': 'Production',
+                'PATCH': 'Patch', 'NONRACK': 'NonRack', 'Thermal': 'Patch', 'ATS': 'Patch', 'IDF Row': 'Patch',
+                'Cabling Infrastr': 'Mini rack', 'OH_MINIRACK': 'Mini rack',
+        },
+    };
+
     let SELECTED_SITE = '';
     let EXCEL_DATA = [];
     let positionMap = new Map();
     window.filteredPositions = {};
-    const LAMBDA_URL = 'https://twuukpz75g.execute-api.us-west-2.amazonaws.com/default/GetS3Data';
-
-    const AVAILABLE_SITES = [
-        'BJS9', 'BJS10', 'BJS11', 'BJS12', 'BJS20', 'BJS50', 'BJS51',
-        'BJS52', 'BJS60', 'BJS70', 'BJS71', 'BJS73', 'BJS74',
-        'BJS80', 'PEK7', 'PEK50', 'PKX140',
-    ];
 
     // 设置界面函数
     function setupInterface() {
@@ -93,9 +168,9 @@
         siteSection.innerHTML = `
             <h2>Select Data Center Site</h2>
             <div class="custom-dropdown">
-                <div class="selected-option" tabindex="0">Select a Site(V1.51)</div>
+                <div class="selected-option" tabindex="0">Select a Site(${CONFIG.VERSION})</div>
                 <ul class="dropdown-options">
-                    ${AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
+                    ${CONFIG.AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
                 </ul>
             </div>
         `;
@@ -272,8 +347,117 @@
             });
         }
 
+        // AI Assistant
+        const aiQuerySection = document.createElement('div');
+        aiQuerySection.className = 'ai-query-section collapsed';
+        aiQuerySection.innerHTML = `
+            <div class="ai-query-header">
+                <div class="ai-query-title">
+                    <span>AI Search</span>
+                </div>
+                <div class="ai-toggle">▼</div>
+            </div>
+            <div class="ai-query-content">
+                <div class="ai-query-container">
+                    <div class="ai-input-wrapper">
+                        <textarea
+                            id="aiQueryInput"
+                            class="ai-query-input"
+                            placeholder="例如: BJS80 有多少机柜会受到 UPS-A 故障的影响？"
+                            rows="2"
+                        ></textarea>
+                        <div class="ai-buttons-group" style="display: flex; flex-direction: column; gap: 6px;">
+                            <button id="aiQueryBtn" class="ai-query-button">
+                                <span class="ai-icon">🔍</span> 查询
+                            </button>
+                            <button id="aiAnalyzeBtn" class="ai-analyze-btn" onclick="analyzeCurrentResults()">
+                                <span>📊</span> AI 分析
+                            </button>
+                        </div>
+                    </div>
+                    <div id="aiQueryResult" class="ai-query-result" style="display: none;"></div>
+                    <div id="aiAnalysisResult" class="ai-analysis-container" style="display: none;"></div>
+                    <div class="ai-query-examples">
+                        <span class="examples-label">💡 示例：</span>
+                        <button class="example-query" data-query="显示 2-1 机房中所有 deployed 状态的机柜">2-1 deployed 机柜</button>
+                        <button class="example-query" data-query="哪些 Network 类型的机柜连接到 Transformer-A？">Network + Transformer-A</button>
+                        <button class="example-query" data-query="哪些机柜的所有电路都连接到同一个变压器">主备连接相同变压器</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // 找到 Tips 区域，插入到它前面
+        const tipsSection = container.querySelector('.tips-container');
+        if (tipsSection) {
+            container.insertBefore(aiQuerySection, tipsSection);
+        } else {
+            container.appendChild(aiQuerySection);
+        }
+
+
         return container;
     }
+
+    /**
+     * 设置 AI 助手相关的事件监听器
+     */
+    function setupAIEventListeners() {
+        // AI 查询按钮
+        const aiQueryBtn = document.getElementById('aiQueryBtn');
+        if (aiQueryBtn) {
+            aiQueryBtn.addEventListener('click', executeAIQuery);
+        }
+
+        // AI 输入框回车键
+        const aiQueryInput = document.getElementById('aiQueryInput');
+        if (aiQueryInput) {
+            aiQueryInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    executeAIQuery();
+                }
+            });
+        }
+
+        // 示例查询按钮
+        document.querySelectorAll('.example-query').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const input = document.getElementById('aiQueryInput');
+                if (input) {
+                    input.value = this.dataset.query;
+                }
+            });
+        });
+
+        // AI 折叠功能
+        const aiHeader = document.querySelector('.ai-query-header');
+        if (aiHeader) {
+            aiHeader.addEventListener('click', function() {
+                const aiSection = this.closest('.ai-query-section');
+                aiSection.classList.toggle('collapsed');
+            }
+        )};
+
+        // 事件委托处理动态按钮
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('.ai-analyze-btn')) {
+                e.preventDefault();
+                analyzeCurrentResults();
+            }
+
+            if (e.target.closest('.ai-clear-filters')) {
+                e.preventDefault();
+                clearAllFilters();
+            }
+
+            if (e.target.closest('.close-analysis')) {
+                e.preventDefault();
+                closeAnalysis();
+            }
+        });
+    }
+
 
     // ==================== CSV 解析函数 ====================
 
@@ -381,19 +565,18 @@
     async function loadDataFromLambda(site) {
         console.log('========================================');
         console.log('[LoadData] Starting load for site:', site);
-        console.log('[LoadData] Lambda URL:', LAMBDA_URL);
-        console.log('========================================');
+        console.log('[LoadData] Lambda URL:', CONFIG.API_ENDPOINTS.LAMBDA_URL);
 
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST",
-                url: LAMBDA_URL,
+                url: CONFIG.API_ENDPOINTS.LAMBDA_URL,
                 headers: {
                     "Content-Type": "application/json",
                     "Accept": "application/json",
-                    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiYmpzZGNlbyIsInR5cGUiOiJwZXJtYW5lbnQifQ.mKaIWhj_d7kxB8fwh2BDDGKMyVLrkiwZZzuZzc8ra6s",
+                    "Authorization": CONFIG.AUTH.BEARER_TOKEN,
                 },
-                data: JSON.stringify({ site: site, cluster: 'bjs' }),
+                data: JSON.stringify({ site: site, cluster: CONFIG.CLUSTER}),
                 onload: function(response) {
                     console.log('[LoadData] Response received');
                     console.log('[LoadData] Status:', response.status);
@@ -586,22 +769,6 @@
         });
     }
 
-    function getFilterOptions() {
-        return [
-            { label: 'Data Hall', column: 'Position Room' },
-            { label: 'Rack', column: 'Position', isPosition: true },
-            { label: 'PDU Name', column: 'PDU Name' },
-            { label: 'UPS Group', column: 'UPS Group' },
-            { label: 'USB', column: 'USB' },
-            { label: 'Transformer', column: 'routingInfo.transformer' },
-            { label: 'Utility', column: 'routingInfo.utility' },
-            { label: 'Power Feed', column: 'Power Feed' },
-            { label: 'Rack Status', column: 'status' },
-            { label: 'Rack Type', column: 'type' },
-            { label: 'Capacity', column: 'power_kva' }
-        ];
-    }
-
     window.ahaLoginWindowOpened = false;
 
     function makeRequest(url, method, retryCount = 0) {
@@ -654,32 +821,65 @@
         });
     }
 
-    // ==================== Part 3 开始 ====================
+    async function callNovaAPI(messages, temperature = CONFIG.NOVA_API.TEMPERATURE) {
+        try {
+            const response = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: `${CONFIG.NOVA_API.BASE_URL}/chat/completions`,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${CONFIG.NOVA_API.API_KEY}`
+                    },
+                    data: JSON.stringify({
+                        model: CONFIG.NOVA_API.MODEL,
+                        messages: messages,
+                        temperature: temperature,
+                        max_tokens: CONFIG.NOVA_API.MAX_TOKENS
+                    }),
+                    onload: resolve,
+                    onerror: reject
+                });
+            });
 
-    const RACK_TYPE_MAPPING = {
-        'NETWORK': 'Network', 'Security': 'Network', 'Fusion Even Prim': 'Network', 'Fusion Odd Prim': 'Network',
-        'Network Core - W': 'Network', 'Network Core - E': 'Network', 'BMS': 'Network', 'Network Edge': 'Network',
-        'AGG - EC2': 'Network', 'CHRONOS': 'Network', 'UMN': 'Network', 'Network Border': 'Network',
-        'Network Core': 'Network', 'Network Enterpri': 'Network', 'Network Manageme': 'Network',
-        'Network L7 - JLB': 'Network', 'Network Buffer': 'Network', 'Network Optical': 'Network',
-        'Network Aggregat': 'Network', 'Network VPC-DX': 'Network', 'Network Catzilla': 'Network',
-        'Network L7': 'Network', 'Network CI': 'Network', 'Network Enterprise': 'Network', 'Network Build': 'Network',
-        '12.8T ES BFC SP': 'Network', '12.8T BFC BR': 'Network', '12.8T ES EUC SP': 'Network', 'Fission': 'Network',
-        'WS BFC BR': 'Network', 'ES BFC SP': 'Network', 'AGG - PROD': 'Network', 'AGG-PROD': 'Network',
-        'Agg - Prod': 'Network', 'AGG - Prod': 'Network', 'AGG-EC2': 'Network', 'Agg - EC2': 'Network',
-        'PATO': 'Network', 'CI/NVR': 'Network', 'BFC BR': 'Network', 'Border': 'Network', 'Optical': 'Network',
-        'VPC': 'Network', 'STORM': 'Network', 'ES EUC SP': 'Network', 'ES BFC BR': 'Network', 'WS EUC SP': 'Network',
-        'WS BFC SP': 'Network', 'LBIR': 'Network', 'Fusion Secondary': 'Network', 'CI': 'Network',
-        'WS UMN': 'Network', 'ES UMN': 'Network', 'L7-JLB': 'Network', 'WMW Puffin Med': 'Network',
-        'IRON RACK': 'Network', 'Data Center Oper': 'Network', 'Bulk Fiber': 'Network', 'CloudFront': 'Network',
-        'Edge': 'Network', 'Corp': 'Network', 'DCO': 'Network', 'FPOD': 'Network', 'Migration Prog': 'Network',
-        'EC2': 'EC2', 'Enterprise': 'EC2', 'S3': 'EC2', 'EBS': 'EBS',
-        'Production': 'Production', 'AWS Prod': 'Production', 'AWS-Prod': 'Production', 'Bering Rack': 'Production',
-        'Bering Tape Rack': 'Production', 'SERVER': 'Production', 'Classic-Prod': 'Production',
-        'Classic Prod': 'Production', 'GPS': 'Production', 'AWS': 'Production',
-        'PATCH': 'Patch', 'NONRACK': 'NonRack', 'Thermal': 'Patch', 'ATS': 'Patch', 'IDF Row': 'Patch',
-        'Cabling Infrastr': 'Mini rack', 'OH_MINIRACK': 'Mini rack',
-    };
+            // 检查 HTTP 状态
+            if (response.status !== 200) {
+                console.error('HTTP Error:', response.status, response.statusText);
+                console.error('Response:', response.responseText);
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            // 解析 JSON
+            const result = JSON.parse(response.responseText);
+            console.log('API Response:', result);  // 调试用
+            console.log('判断条件:', result.choices && result.choices.length > 0 && result.choices.message);
+            console.log('判断条件1:', result.choices);
+            console.log('判断条件2:', result.choices.length > 0);
+            console.log('判断条件3:', result.choices[0].message.content);
+
+            // 检查响应结构
+            if (result.choices.length > 0) {
+                return {
+                    success: true,
+                    content: result.choices[0].message.content,  // ✅ 修正：添加
+                    usage: result.usage
+                };
+            } else {
+                console.error('Invalid response structure:', result);
+                throw new Error('Invalid API response structure');
+            }
+        } catch (error) {
+            console.error('Nova API 调用失败:', error);
+            console.error('Error details:', error.message);
+            return {
+                success: false,
+                error: error.message || 'API 调用失败'
+            };
+        }
+    }
+
+
+    // ==================== Part 3 开始 ====================
 
     async function fetchPositionInfo(site) {
         const urls = {
@@ -769,7 +969,7 @@
 
                     let rackType = 'unknown';
                     if (item.intended_customer) {
-                        rackType = RACK_TYPE_MAPPING[item.intended_customer] || 'unknown';
+                        rackType = CONFIG.RACK_TYPE_MAPPING[item.intended_customer] || 'unknown';
                         if (rackType === 'unknown' || item.intended_customer === 'ANY') rackType = item.uplink_fabric.toUpperCase();
                         if (rackType === 'Network' && parseFloat(item.power_kva) === 0) rackType = 'Patch';
                     }
@@ -804,7 +1004,7 @@
 
     function initializeFilters(filtersContainer, stats) {
         filtersContainer.innerHTML = '';
-        const filters = getFilterOptions();
+        const filters = CONFIG.FILTER_OPTIONS;
 
         filters.forEach(filter => {
             const filterSection = document.createElement('div');
@@ -1259,23 +1459,23 @@
 
                     if (redundancy === '2N' || redundancy === 'N+C') {
                         if (!hasDualPower) {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && expected.primary > 0) result.push(position.position);
-                            else if (metric === 'Lost Primary' && remainingPrimary < expected.primary && remainingPrimary > 0) result.push(position.position);
+                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && expected.primary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Primary' && remainingPrimary < expected.primary && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
                         } else {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(position.position);
-                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(position.position);
-                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(position.position);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(position.position);
+                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
                         }
                     } else {
                         if (!hasDualPower) {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0 && (expected.primary > 0 || expected.secondary > 0)) result.push(position.position);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary) result.push(position.position);
+                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0 && (expected.primary > 0 || expected.secondary > 0)) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary) result.push(`${position.room} ${position.position}`);
                         } else {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(position.position);
-                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(position.position);
-                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(position.position);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(position.position);
+                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
                         }
                     }
                 });
@@ -1317,7 +1517,7 @@
                         <table class="stats-table">
                             <thead>
                                 <tr>
-                                    <th>Power Status</th>
+                                    <th>Potential Power Impact</th>
                                     ${activeRackTypes.filter(type => type !== 'PATCH').map(type => `<th>${type === 'NETWORK' ? 'NETWORK(Euclid)' : type}</th>`).join('')}
                                     <th>Total</th>
                                 </tr>
@@ -1329,8 +1529,9 @@
                                         const positionsArray = getPositionsForMetric(window.positions, type, metric);
                                         return generateStatsCell(type, metric, total, positionsArray);
                                     });
+                                    const displayName = CONFIG.DISPLAY_NAMES[metric];
                                     const rowTotal = activeRackTypes.filter(type => type !== 'PATCH').reduce((sum, type) => sum + (stats.detailedStats[type][metric] || 0), 0);
-                                    return `<tr><td>${metric}</td>${rowValues.join('')}<td class="stats-cell">${rowTotal}</td></tr>`;
+                                    return `<tr><td>${displayName}</td>${rowValues.join('')}<td class="stats-cell">${rowTotal}</td></tr>`;
                                 }).join('')}
                                 <tr class="total-row">
                                     <td>Total</td>
@@ -1635,7 +1836,7 @@
                             .join('\n');
 
                         modal.querySelector('.modal-header').innerHTML = `
-                            <div class="modal-title">${type} - ${metric} (${positions.length} positions)</div>
+                            <div class="modal-title">${type} - ${CONFIG.DISPLAY_NAMES[metric]} (${positions.length} positions)</div>
                             <div class="modal-actions">
                                 <button class="copy-positions-button" data-copy-text="${encodeURIComponent(positionsText)}"><span class="export-icon">📋</span> Copy</button>
                                 <div class="modal-close">&times;</div>
@@ -1645,7 +1846,7 @@
                             .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
                             .map(position => {
                                 const matchingPosition = Object.entries(window.positions).find(([key, pos]) =>
-                                    pos.position === position && pos.type.toUpperCase() === type
+                                    `${pos.room} ${pos.position}` === position && pos.type.toUpperCase() === type
                                 );
                                 if (!matchingPosition) return '';
 
@@ -1745,10 +1946,17 @@
         });
     }
 
+    window.analyzeCurrentResults = analyzeCurrentResults;
+    window.closeAnalysis = closeAnalysis;
+    window.collectDetailedAnalysisData = collectDetailedAnalysisData;
+    window.createAnalysisDiv = createAnalysisDiv;
+
+
     // 初始化函数
     async function init() {
         const maxRetries = 3;
         let retryCount = 0;
+        window.clearAllFilters = clearAllFilters;
 
         while (retryCount < maxRetries) {
             try {
@@ -1760,6 +1968,8 @@
 
                 const container = setupInterface();
                 document.getElementById('xwikicontent').appendChild(container);
+
+                setupAIEventListeners();
 
                 const loadingIndicator = container.querySelector('.loading-indicator');
                 if (loadingIndicator) {
@@ -1783,6 +1993,764 @@
             }
         }
     }
+
+    // ==================== AI功能 ====================
+    // 解析自然语言查询为筛选条件
+    async function parseNaturalLanguageQuery(userQuery) {
+        const availableOptions = {};
+        document.querySelectorAll('.filter-select').forEach(select => {
+            const column = $(select).data('column');
+            const label = $(select).closest('.filter-section').find('label').text().trim();
+            const options = [];
+            $(select).find('option').each(function() {
+                if (this.value) options.push(this.value);
+            });
+            if (options.length > 0) {
+                availableOptions[label] = { column: column, values: options };
+            }
+        });
+
+        // 构建当前数据摘要（用于复杂查询）
+        const dataSummary = buildDataSummary();
+
+        // 构建可用选项的描述文本
+        let optionsDescription = '当前站点可用的筛选选项及其值：';
+        Object.entries(availableOptions).forEach(([label, info]) => {
+            const displayValues = info.values.length > 30
+                ? info.values.slice(0, 30).join(', ') + ` ... (共${info.values.length}个)`
+                : info.values.join(', ');
+            optionsDescription += `- ${label} (字段名: ${info.column}): [${displayValues}]
+        `;
+        });
+
+
+        const systemPrompt = `你是一个数据中心电力拓扑查询助手。用户会用自然语言描述查询需求，你需要判断查询类型并返回相应结果。
+    ${optionsDescription}
+
+    查询类型判断：
+    1. **simple**: 可以直接通过筛选条件实现的查询（如"显示DH01的机柜"、"查看UPS-A1组的机柜"）
+    2. **complex**: 需要跨字段关系分析的查询（如"哪些机柜的所有电路都连接到同一个变压器"、"找出只有单路供电的机柜"、"哪些机柜的主备电路连接到同一个UPS"）
+
+    对于 simple 类型，返回：
+    {
+        "queryType": "simple",
+        "filters": {
+            "Position Room": ["DH01"],
+            "status": ["deployed"]
+        },
+        "explanation": "查询 DH01 机房中所有已部署的机柜"
+    }
+
+    对于 complex 类型，你需要分析数据并返回：
+    {
+        "queryType": "complex",
+        "explanation": "查询意图的中文解释",
+        "analysis": "详细的分析结论（中文），包括统计数字和关键发现，但不要列出所有机柜名称",
+        "filterLogic": {
+            "type": "描述筛选逻辑类型",
+            "description": "筛选逻辑的自然语言描述",
+            "rule": {
+                "field": "要检查的字段（如 transformer, upsGroup, pdu, utility）",
+                "condition": "条件类型（如 allSame, allDifferent, contains, count_equals, count_less_than）",
+                "value": "可选的比较值",
+                "scope": "检查范围（如 allCircuits, primaryOnly, secondaryOnly）"
+            }
+        }
+    }
+
+    filterLogic.rule 的 condition 可选值：
+    - allSame: 该机柜所有电路的指定字段值都相同
+    - allDifferent: 该机柜所有电路的指定字段值都不同
+    - contains: 该机柜的电路中包含指定值
+    - count_equals: 该机柜的电路数量等于指定值
+    - count_less_than: 该机柜的电路数量小于指定值
+    - primaryAndSecondarySame: 主备电路的指定字段值相同
+
+    示例：
+    查询"哪些机柜的所有电路都连接到同一个变压器"：
+    {
+        "queryType": "complex",
+        "explanation": "查找所有电路都连接到同一个变压器的机柜",
+        "analysis": "经分析，当前站点共有 X 个机柜的所有电路连接到同一个变压器...",
+        "filterLogic": {
+            "type": "cross_field_analysis",
+            "description": "检查每个机柜的所有电路是否连接到同一个变压器",
+            "rule": {
+                "field": "transformer",
+                "condition": "allSame",
+                "scope": "allCircuits"
+            }
+        }
+    }
+
+    重要：不要在返回中包含 matchedPositions 数组，机柜列表将由前端代码根据 filterLogic 自动计算。`;
+
+        const messages = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `用户查询: "${userQuery}"
+
+    请判断查询类型并返回相应的 JSON 结果。` }
+        ];
+
+        // 复杂查询需要更多 tokens
+        const result = await callNovaAPI(messages, 0.2, 3000);
+
+        if (!result.success) {
+            return {
+                error: 'AI 服务暂时不可用',
+                suggestion: '请稍后重试或使用手动筛选'
+            };
+        }
+
+        try {
+            let jsonText = result.content.trim();
+
+            // 方法1：尝试提取 markdown 代码块中的 JSON
+            const jsonMatch = jsonText.match(/```json\s*([\s\S]*?)\s*```/) ||
+                             jsonText.match(/```\s*([\s\S]*?)\s*```/);
+            if (jsonMatch) {
+                jsonText = jsonMatch[1].trim();
+            }
+
+            // 方法2：如果没有代码块，尝试找到第一个 { 和最后一个 }
+            if (!jsonMatch) {
+                const firstBrace = jsonText.indexOf('{');
+                const lastBrace = jsonText.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace !== -1) {
+                    jsonText = jsonText.substring(firstBrace, lastBrace + 1);
+                }
+            }
+
+            return JSON.parse(jsonText);
+        } catch (error) {
+            console.error('解析 AI 响应失败:', error, result.content);
+            return {
+                error: '解析失败',
+                suggestion: '请尝试更简单的查询方式'
+            };
+        }
+    }
+
+    //执行 AI 查询
+    async function executeAIQuery() {
+        const queryInput = document.getElementById('aiQueryInput');
+        const resultDiv = document.getElementById('aiQueryResult');
+        const queryBtn = document.getElementById('aiQueryBtn');
+
+        const userQuery = queryInput.value.trim();
+        if (!userQuery) {
+            alert('请输入查询内容');
+            return;
+        }
+
+        queryBtn.disabled = true;
+        queryBtn.innerHTML = '<span class="ai-icon">⏳</span> AI 分析中...';
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<div class="ai-loading">🤖 Nova AI 正在理解您的查询...</div>';
+
+        try {
+            const parseResult = await parseNaturalLanguageQuery(userQuery);
+
+            if (parseResult.error) {
+                resultDiv.innerHTML = `
+                    <div class="ai-error">
+                        <strong>❌ ${parseResult.error}</strong>
+                        <p>${parseResult.suggestion}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // 根据查询类型分别处理
+            if (parseResult.queryType === 'complex') {
+                // 本地执行复杂筛选逻辑
+                let matchedPositions = [];
+                if (parseResult.filterLogic && parseResult.filterLogic.rule) {
+                    matchedPositions = executeComplexFilter(parseResult.filterLogic);
+                }
+
+                resultDiv.innerHTML = `
+                    <div class="ai-success">
+                        <div class="ai-explanation">
+                            <strong>🎯 查询理解：</strong>
+                            <p>${parseResult.explanation}</p>
+                        </div>
+                        <div class="ai-analysis-inline">
+                            <strong>📊 分析结果：</strong>
+                            <div class="analysis-content">
+                                ${formatAnalysisResult(parseResult.analysis)}
+                            </div>
+                        </div>
+                        <div class="ai-matched-positions">
+                            <strong>📋 匹配的机柜 (${matchedPositions.length} 个)：</strong>
+                            <p style="max-height: 200px; overflow-y: auto; font-size: 12px;">
+                                ${matchedPositions.join(', ')}
+                            </p>
+                        </div>
+                        <div class="ai-actions">
+                            <button class="ai-clear-filters" onclick="clearAllFilters()">
+                                <span>🗑️</span> 清除筛选
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // 简单查询：走原有的筛选逻辑
+                document.querySelectorAll('.filter-select').forEach(select => {
+                    $(select).val(null).trigger('change');
+                });
+
+                const filters = parseResult.filters;
+                let appliedFilters = [];
+
+                Object.entries(filters).forEach(([column, values]) => {
+                    const select = $(`.filter-select[data-column="${column}"]`);
+                    if (select.length) {
+                        select.val(values).trigger('change');
+                        appliedFilters.push(`<li><strong>${column}:</strong> ${values.join(', ')}</li>`);
+                    }
+                });
+
+                await new Promise(resolve => setTimeout(resolve, 800));
+                const stats = collectCurrentStats();
+
+                resultDiv.innerHTML = `
+                    <div class="ai-success">
+                        <div class="ai-explanation">
+                            <strong>🎯 查询理解：</strong>
+                            <p>${parseResult.explanation}</p>
+                        </div>
+                        <div class="ai-filters-applied">
+                            <strong>📋 应用的筛选条件：</strong>
+                            <ul>${appliedFilters.join('')}</ul>
+                        </div>
+                        <div class="ai-results-summary">
+                            <strong>📊 查询结果：</strong>
+                            <p>共找到 <strong>${stats.totalPositions}</strong> 个符合条件的机柜</p>
+                            ${stats.totalPositions > 0 ? '<p>详细信息请查看下方的 Summary Table 和 Detail Info 区域</p>' : '<p>请尝试调整筛选条件</p>'}
+                        </div>
+                        <div class="ai-actions">
+                            <button class="ai-clear-filters" onclick="clearAllFilters()">
+                                <span>🗑️</span> 清除筛选
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+        } catch (error) {
+            console.error('查询执行失败:', error);
+            resultDiv.innerHTML = `
+                <div class="ai-error">
+                    <strong>❌ 查询执行失败</strong>
+                    <p>${error.message}</p>
+                </div>
+            `;
+        } finally {
+            queryBtn.disabled = false;
+            queryBtn.innerHTML = '<span class="ai-icon">🔍</span> 查询';
+        }
+    }
+
+    // 收集当前统计数据
+    function collectCurrentStats() {
+        const totalPositions = Object.keys(window.filteredPositions || {}).length;
+        const rackTypes = {};
+        const powerStatus = {
+            'At Risk - Primary Loss': 0,
+            'At Risk - Secondary Loss': 0,
+            'At Risk - Partial Loss': 0,
+            'At Risk - Complete Loss': 0
+        };
+
+        Object.values(window.filteredPositions || {}).forEach(pos => {
+            const type = pos.type || 'Unknown';
+            rackTypes[type] = (rackTypes[type] || 0) + 1;
+        });
+
+        return {
+            totalPositions,
+            rackTypes,
+            powerStatus
+        };
+    }
+
+    function buildDataSummary() {
+        // 按机柜聚合电路信息，用于统计
+        const positionData = {};
+        EXCEL_DATA.forEach(row => {
+            const key = `${row['Position Room']}-${row['Position']}`;
+            if (!positionData[key]) {
+                positionData[key] = { circuits: [] };
+                const posInfo = positionMap.get(key);
+                if (posInfo) {
+                    positionData[key].type = posInfo.type || 'unknown';
+                    positionData[key].status = posInfo.status || 'unknown';
+                    positionData[key].power_redundancy = posInfo.power_redundancy || 'unknown';
+                }
+            }
+            positionData[key].circuits.push({
+                powerFeed: row['Power Feed'],
+                pdu: row['PDU Name'],
+                upsGroup: row['UPS Group'],
+                usb: row['USB'],
+                transformer: row.routingInfo?.transformer || 'N/A',
+                utility: row.routingInfo?.utility || 'N/A'
+            });
+        });
+
+        const allPositions = Object.entries(positionData);
+
+        // 唯一值统计
+        const uniqueTransformers = [...new Set(EXCEL_DATA.map(r => r.routingInfo?.transformer).filter(Boolean))];
+        const uniqueUPS = [...new Set(EXCEL_DATA.map(r => r['UPS Group']).filter(Boolean))];
+        const uniquePDUs = [...new Set(EXCEL_DATA.map(r => r['PDU Name']).filter(Boolean))];
+        const uniqueUSBs = [...new Set(EXCEL_DATA.map(r => r['USB']).filter(Boolean))];
+        const uniqueUtilities = [...new Set(EXCEL_DATA.map(r => r.routingInfo?.utility).filter(Boolean))];
+
+        // 电路数量分布
+        const circuitCounts = {};
+        allPositions.forEach(([key, pos]) => {
+            const count = pos.circuits.length;
+            circuitCounts[count] = (circuitCounts[count] || 0) + 1;
+        });
+
+        // 冗余类型分布
+        const redundancyDist = {};
+        allPositions.forEach(([key, pos]) => {
+            const r = pos.power_redundancy || 'unknown';
+            redundancyDist[r] = (redundancyDist[r] || 0) + 1;
+        });
+
+        // 机柜类型分布
+        const typeDist = {};
+        allPositions.forEach(([key, pos]) => {
+            const t = pos.type || 'unknown';
+            typeDist[t] = (typeDist[t] || 0) + 1;
+        });
+
+        let summary = `当前站点数据概览：
+    - 机柜总数: ${allPositions.length}
+    - 电路总数: ${EXCEL_DATA.length}
+
+    每个机柜的数据结构：
+    - 每个机柜有多条电路（power circuit），每条电路包含以下字段：
+      - powerFeed: 供电类型（Primary 或 Secondary）
+      - pdu: PDU 名称
+      - upsGroup: UPS 组名称
+      - usb: USB（不间断开关板）名称
+      - transformer: 变压器名称
+      - utility: 电源来源
+    - 机柜元数据：type（类型）、status（状态）、power_redundancy（冗余配置）
+
+    电路数量分布：
+    `;
+        Object.entries(circuitCounts).sort((a, b) => a - b).forEach(([count, num]) => {
+            summary += `- ${count} 条电路: ${num} 个机柜
+    `;
+        });
+
+        summary += `
+    冗余配置分布：
+    `;
+        Object.entries(redundancyDist).forEach(([type, count]) => {
+            summary += `- ${type}: ${count} 个机柜
+    `;
+        });
+
+        summary += `
+    机柜类型分布：
+    `;
+        Object.entries(typeDist).forEach(([type, count]) => {
+            summary += `- ${type}: ${count} 个机柜
+    `;
+        });
+
+        summary += `
+    设备唯一值：
+    - 变压器 (${uniqueTransformers.length}): ${uniqueTransformers.join(', ')}
+    - UPS组 (${uniqueUPS.length}): ${uniqueUPS.join(', ')}
+    - USB (${uniqueUSBs.length}): ${uniqueUSBs.join(', ')}
+    - PDU (${uniquePDUs.length}): ${uniquePDUs.length <= 20 ? uniquePDUs.join(', ') : uniquePDUs.slice(0, 20).join(', ') + '...'}
+    - 电源 (${uniqueUtilities.length}): ${uniqueUtilities.join(', ')}
+    `;
+
+        summary += `
+    注意：你不需要返回匹配的机柜列表（matchedPositions），前端代码会根据你返回的 filterLogic 规则自动执行筛选。
+    你只需要：
+    1. 理解用户的查询意图
+    2. 基于以上数据概览给出分析结论（analysis 字段）
+    3. 返回正确的 filterLogic 规则，前端会用它来筛选数据
+
+    可用的 filterLogic.rule.field 值: pdu, upsGroup, usb, transformer, utility, powerFeed
+    可用的 filterLogic.rule.condition 值: allSame, allDifferent, contains, count_equals, count_less_than, primaryAndSecondarySame
+    可用的 filterLogic.rule.scope 值: allCircuits, primaryOnly, secondaryOnly
+    `;
+
+        return summary;
+    }
+
+    function executeComplexFilter(filterLogic) {
+        const positionData = {};
+
+        // 按机柜聚合电路信息
+        EXCEL_DATA.forEach(row => {
+            const key = `${row['Position Room']}-${row['Position']}`;
+            if (!positionData[key]) {
+                positionData[key] = { circuits: [] };
+            }
+            positionData[key].circuits.push({
+                pdu: row['PDU Name'],
+                upsGroup: row['UPS Group'],
+                usb: row['USB'],
+                powerFeed: row['Power Feed'],
+                transformer: row.routingInfo?.transformer || 'N/A',
+                utility: row.routingInfo?.utility || 'N/A'
+            });
+        });
+
+        const rule = filterLogic.rule;
+        const matchedPositions = [];
+
+        Object.entries(positionData).forEach(([key, pos]) => {
+            let circuits = pos.circuits;
+
+            // 根据 scope 筛选电路范围
+            if (rule.scope === 'primaryOnly') {
+                circuits = circuits.filter(c => c.powerFeed === 'Primary');
+            } else if (rule.scope === 'secondaryOnly') {
+                circuits = circuits.filter(c => c.powerFeed === 'Secondary');
+            }
+
+            if (circuits.length === 0) return;
+
+            let matched = false;
+
+            switch (rule.condition) {
+                case 'allSame': {
+                    const values = circuits.map(c => c[rule.field]).filter(v => v && v !== 'N/A');
+                    matched = values.length > 1 && new Set(values).size === 1;
+                    break;
+                }
+                case 'allDifferent': {
+                    const values = circuits.map(c => c[rule.field]).filter(v => v && v !== 'N/A');
+                    matched = values.length > 1 && new Set(values).size === values.length;
+                    break;
+                }
+                case 'primaryAndSecondarySame': {
+                    const primary = circuits.filter(c => c.powerFeed === 'Primary').map(c => c[rule.field]);
+                    const secondary = circuits.filter(c => c.powerFeed === 'Secondary').map(c => c[rule.field]);
+                    if (primary.length > 0 && secondary.length > 0) {
+                        const primarySet = new Set(primary);
+                        const secondarySet = new Set(secondary);
+                        // 检查主备电路是否有交集
+                        matched = [...primarySet].some(v => secondarySet.has(v));
+                    }
+                    break;
+                }
+                case 'contains': {
+                    matched = circuits.some(c => c[rule.field] === rule.value);
+                    break;
+                }
+                case 'count_equals': {
+                    matched = circuits.length === parseInt(rule.value);
+                    break;
+                }
+                case 'count_less_than': {
+                    matched = circuits.length < parseInt(rule.value);
+                    break;
+                }
+                default:
+                    console.warn('未知的筛选条件:', rule.condition);
+            }
+
+            if (matched) {
+                matchedPositions.push(key);
+            }
+        });
+
+        return matchedPositions;
+    }
+
+
+    /**
+     * 分析当前筛选结果
+     */
+    async function analyzeCurrentResults() {
+        const analysisDiv = document.getElementById('aiAnalysisResult') || createAnalysisDiv();
+        const analyzeBtn = document.querySelector('.ai-analyze-btn');
+
+        if (analyzeBtn) {
+            analyzeBtn.disabled = true;
+            analyzeBtn.innerHTML = '<span>⏳</span> 分析中...';
+        }
+
+        analysisDiv.style.display = 'block';
+        analysisDiv.innerHTML = '<div class="ai-loading">🤖 Nova AI 正在分析筛选结果...</div>';
+
+        try {
+            // 1. 收集当前数据
+            const currentData = collectDetailedAnalysisData();
+
+            // 2. 构建分析 prompt
+            const systemPrompt = `你是一个数据中心电力影响分析专家。你需要分析机柜的电力影响情况，判断是"潜在影响"还是"直接影响"，并提供下一步关注建议。
+
+    关键概念：
+    - **直接影响**：当前筛选的电力组件故障会立即导致机柜断电
+    - **潜在影响**：由于站点有冗余和自动故障转移机制，机柜可能不会立即断电，但存在风险
+
+    电力冗余类型：
+    - **2N**: 双路供电，完全冗余
+    - **N+C**: N+1 冗余配置
+    - **N**: 单路供电，无冗余
+
+    风险等级：
+    - **At Risk - Complete Loss**: 所有电路都受影响，最高风险
+    - **At Risk - Primary Loss**: 主电路受影响
+    - **At Risk - Secondary Loss**: 备用电路受影响
+    - **At Risk - Partial Loss**: 部分电路受影响
+
+    请用中文提供：
+    1. 影响性质判断（潜在影响 vs 直接影响）
+    2. 风险等级评估
+    3. 关键设备识别
+    4. 下一步行动建议`;
+
+            const userPrompt = `当前筛选条件：
+    ${JSON.stringify(currentData.filters, null, 2)}
+
+    影响统计：
+    - 总机柜数：${currentData.totalRacks}
+    - At Risk - Complete Loss: ${currentData.riskStats['At Risk - Complete Loss'] || 0} 个
+    - At Risk - Primary Loss: ${currentData.riskStats['At Risk - Primary Loss'] || 0} 个
+    - At Risk - Secondary Loss: ${currentData.riskStats['At Risk - Secondary Loss'] || 0} 个
+    - At Risk - Partial Loss: ${currentData.riskStats['At Risk - Partial Loss'] || 0} 个
+
+    机柜类型分布：
+    ${JSON.stringify(currentData.rackTypes, null, 2)}
+
+    电力冗余配置：
+    ${JSON.stringify(currentData.redundancyTypes, null, 2)}
+
+    请分析这些机柜目前是潜在影响还是直接影响，并说明下一步需要关注什么设备。`;
+
+            const messages = [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ];
+
+            // 3. 调用 Nova API
+            const result = await callNovaAPI(messages, 0.5);
+
+            if (!result.success) {
+                throw new Error(result.error);
+            }
+
+            // 4. 显示分析结果
+            analysisDiv.innerHTML = `
+                <div class="ai-analysis-result">
+                    <div class="analysis-header">
+                        <h3>🔍 AI 影响分析报告</h3>
+                        <button class="close-analysis" onclick="closeAnalysis()">✕</button>
+                    </div>
+                    <div class="analysis-content">
+                        ${formatAnalysisResult(result.content)}
+                    </div>
+                    <div class="analysis-footer">
+                        <small>由 Amazon Nova AI 生成 | Token 使用: ${result.usage.total_tokens}</small>
+                    </div>
+                </div>
+            `;
+
+        } catch (error) {
+            console.error('分析失败:', error);
+            analysisDiv.innerHTML = `
+                <div class="ai-error">
+                    <strong>❌ 分析失败</strong>
+                    <p>${error.message}</p>
+                </div>
+            `;
+        } finally {
+            if (analyzeBtn) {
+                analyzeBtn.disabled = false;
+                analyzeBtn.innerHTML = '<span>🔍</span> AI 分析影响';
+            }
+        }
+    }
+
+    // 收集详细分析数据
+    function collectDetailedAnalysisData() {
+        const currentFilters = {};
+        document.querySelectorAll('.filter-select').forEach(select => {
+            const column = $(select).data('column');
+            const values = $(select).val() || [];
+            if (values.length > 0) {
+                const label = $(select).closest('.filter-section').find('label').text().trim();
+                currentFilters[label] = values;
+            }
+        });
+
+        const rackTypes = {};
+        const redundancyTypes = {};
+        const riskStats = {
+            'At Risk - Complete Loss': 0,
+            'At Risk - Primary Loss': 0,
+            'At Risk - Secondary Loss': 0,
+            'At Risk - Partial Loss': 0
+        };
+
+        // 获取当前筛选后的数据
+        let positionsToAnalyze = window.filteredPositions || {};
+
+        // 如果 filteredPositions 为空但有活跃筛选条件，从 positionMap 重新构建
+        if (Object.keys(positionsToAnalyze).length === 0 && Object.keys(currentFilters).length > 0) {
+            const activeFilters = {};
+            document.querySelectorAll('.filter-select').forEach(select => {
+                const column = $(select).data('column');
+                const values = $(select).val() || [];
+                if (values.length > 0) {
+                    activeFilters[column] = values.map(v => String(v).trim());
+                }
+            });
+
+            const filterLogic = window.filterLogic || 'and';
+            const activeFilterEntries = Object.entries(activeFilters).filter(([col, vals]) => vals && vals.length > 0);
+
+            if (activeFilterEntries.length > 0) {
+                const filteredData = EXCEL_DATA.filter(item => {
+                    const checkMatch = (column, values) => {
+                        if (!values || values.length === 0) return true;
+                        if (column === 'type' || column === 'status') {
+                            const positionKey = `${item['Position Room']}-${item['Position']}`;
+                            const posInfo = positionMap.get(positionKey);
+                            const value = column === 'type' ? posInfo?.type : posInfo?.status;
+                            return values.includes(value);
+                        } else if (column === 'power_kva') {
+                            const positionKey = `${item['Position Room']}-${item['Position']}`;
+                            const posInfo = positionMap.get(positionKey);
+                            return values.some(v => parseFloat(v) === posInfo?.power_kva);
+                        } else if (column.startsWith('routingInfo.')) {
+                            const routingValue = item.routingInfo?.[column.split('.')[1]];
+                            return values.some(v => String(routingValue || '').trim() === String(v).trim());
+                        } else {
+                            const itemValue = String(item[column] || '').trim();
+                            return values.some(v => String(v).trim() === itemValue);
+                        }
+                    };
+
+                    if (filterLogic === 'and') {
+                        return activeFilterEntries.every(([column, values]) => checkMatch(column, values));
+                    } else {
+                        return activeFilterEntries.some(([column, values]) => checkMatch(column, values));
+                    }
+                });
+
+                // 从筛选后的数据构建 positionsToAnalyze
+                filteredData.forEach(item => {
+                    const key = `${item['Position Room']}-${item['Position']}`;
+                    if (!positionsToAnalyze[key]) {
+                        positionsToAnalyze[key] = item;
+                    }
+                });
+            }
+        }
+
+        // 遍历分析数据
+        Object.entries(positionsToAnalyze).forEach(([key, pos]) => {
+            const posInfo = positionMap.get(key);
+            if (!posInfo) return;
+
+            // 统计机柜类型
+            const type = posInfo.type || 'Unknown';
+            rackTypes[type] = (rackTypes[type] || 0) + 1;
+
+            // 统计冗余类型
+            const redundancy = posInfo.power_redundancy || 'Unknown';
+            redundancyTypes[redundancy] = (redundancyTypes[redundancy] || 0) + 1;
+        });
+
+        // 统计风险等级 - 从当前页面的统计数据中获取
+        const summaryTable = document.querySelector('.summary-title');
+        if (summaryTable) {
+            // 尝试从页面上的统计表格中读取风险数据
+            document.querySelectorAll('.stats-table td, .stats-cell').forEach(cell => {
+                const text = cell.textContent || '';
+                Object.keys(riskStats).forEach(riskLevel => {
+                    if (text.includes(riskLevel)) {
+                        const countCell = cell.nextElementSibling;
+                        if (countCell) {
+                            const count = parseInt(countCell.textContent) || 0;
+                            riskStats[riskLevel] = count;
+                        }
+                    }
+                });
+            });
+        }
+
+        return {
+            filters: currentFilters,
+            totalRacks: Object.keys(positionsToAnalyze).length,
+            rackTypes,
+            redundancyTypes,
+            riskStats
+        };
+    }
+
+
+
+
+    /**
+     * 格式化分析结果
+     */
+    function formatAnalysisResult(content) {
+        // 将 markdown 格式转换为 HTML
+        return content
+            .trim()
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\n\n/g, '</p><p>')
+            .replace(/\n/g, '<br>')
+            .replace(/^(.+)$/s, '<p>$1</p>');
+    }
+
+    /**
+     * 创建分析结果显示区域
+     */
+    function createAnalysisDiv() {
+        const div = document.createElement('div');
+        div.id = 'aiAnalysisResult';
+        div.className = 'ai-analysis-container';
+        document.querySelector('.ai-query-section').appendChild(div);
+        return div;
+    }
+
+    function clearAllFilters() {
+        document.querySelectorAll('.filter-select').forEach(select => {
+            $(select).val(null).trigger('change');
+        });
+
+        const aiQueryResult = document.getElementById('aiQueryResult');
+        if (aiQueryResult) {
+            aiQueryResult.style.display = 'none';
+        }
+
+        const aiAnalysisResult = document.getElementById('aiAnalysisResult');
+        if (aiAnalysisResult) {
+            aiAnalysisResult.style.display = 'none';
+        }
+
+        const aiQueryInput = document.getElementById('aiQueryInput');
+        if (aiQueryInput) {
+            aiQueryInput.value = '';
+        }
+    }
+
+    function closeAnalysis() {
+        const analysisDiv = document.getElementById('aiAnalysisResult');
+        if (analysisDiv) {
+            analysisDiv.style.display = 'none';
+        }
+    }
+
 
     // ==================== 样式定义 ====================
     GM_addStyle(`
@@ -2010,6 +2978,267 @@
         .logic-btn-sm.active {
             background: #1976d2;
             color: white;
+        }
+
+        /* AI 查询区域 */
+        .ai-query-section {
+            margin: 15px 0;
+            background: #f8f9fa;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .ai-query-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .ai-query-title {
+            display: flex;
+            align-items: center;
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .ai-query-title .ai-icon {
+            font-size: 20px;
+            margin-right: 10px;
+        }
+
+        .ai-toggle {
+            font-size: 14px;
+            transition: transform 0.3s ease;
+        }
+
+        .ai-query-section.collapsed .ai-toggle {
+            transform: rotate(-90deg);
+        }
+
+        .ai-query-content {
+            padding: 15px 20px;
+            background: white;
+            max-height: 500px;
+            overflow-y: auto;
+            transition: max-height 0.3s ease, padding 0.3s ease;
+        }
+
+        .ai-query-section.collapsed .ai-query-content {
+            max-height: 0;
+            padding: 0 20px;
+        }
+
+        /* AI 查询容器内部样式保持不变 */
+        .ai-query-container {
+            /* 原有样式 */
+        }
+
+
+        .ai-query-container {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+        }
+
+        .ai-input-wrapper {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .ai-query-input {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        .ai-query-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .ai-query-button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .ai-query-button:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .ai-query-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .ai-loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .ai-success {
+            background: #e8f5e9;
+            border: 1px solid #4caf50;
+            padding: 15px;
+            border-radius: 6px;
+        }
+
+        .ai-error {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            padding: 15px;
+            border-radius: 6px;
+            color: #c62828;
+        }
+
+        .ai-actions {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .ai-clear-filters {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .ai-buttons-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: fit-content;
+        }
+
+        .ai-analyze-btn {
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+            transition: opacity 0.2s;
+        }
+
+        .ai-analyze-btn:hover {
+            opacity: 0.9;
+        }
+
+        .ai-analyze-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .ai-clear-filters {
+            background: #ff9800;
+            color: white;
+        }
+
+        .ai-clear-filters:hover {
+            background: #f57c00;
+        }
+
+        .ai-analysis-container {
+            margin-top: 15px;
+        }
+
+        .ai-analysis-result {
+            background: #fff3e0;
+            border: 2px solid #ff9800;
+            border-radius: 6px;
+            overflow-y: auto;
+            max-height: 600px;
+        }
+
+        .analysis-header {
+            background: #ff9800;
+            color: white;
+            padding: 12px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .analysis-header h3 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .close-analysis {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+        }
+
+        .analysis-content {
+            padding: 15px;
+            line-height: 1.6;
+        }
+
+        .analysis-footer {
+            padding: 10px 15px;
+            background: #ffe0b2;
+            border-top: 1px solid #ffb74d;
+            text-align: right;
+        }
+
+        .ai-query-examples {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .examples-label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 600;
+        }
+
+        .example-query {
+            padding: 4px 10px;
+            background: #f5f5f5;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .example-query:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
         }
     `);
 
