@@ -68,7 +68,7 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.6',
+        VERSION: '1.61',
         CLUSTER:'bjs',
 
         // API 端点配置
