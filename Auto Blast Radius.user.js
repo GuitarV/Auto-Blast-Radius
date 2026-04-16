@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.6
+// @version      1.61
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -94,7 +94,7 @@
         AVAILABLE_SITES: [
             'BJS9', 'BJS10', 'BJS11', 'BJS12', 'BJS20', 'BJS50', 'BJS51',
             'BJS52', 'BJS60', 'BJS70', 'BJS71', 'BJS73', 'BJS74',
-            'BJS80', 'PEK7', 'PEK50', 'PKX140'
+            'BJS80', 'PEK7', 'PEK50', 'PKX140', 'PKX141'
         ],
 
         // 筛选器选项配置
