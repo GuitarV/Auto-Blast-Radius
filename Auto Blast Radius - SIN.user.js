@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Auto Blast Radius - SIN
 // @namespace    http://tampermonkey.net/
-// @version      1.53
+// @version      1.61
 // @author       xiongwev
-// @description  Display datacenter rack topology with S3 file management
+// @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/SIN_colo_dceo/AutoBlastRadius*
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
@@ -12,40 +12,27 @@
 // @require      https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0-rc.0/js/select2.min.js
 // @resource     SELECT2_CSS https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0-rc.0/css/select2.min.css
 // @connect      twuukpz75g.execute-api.us-west-2.amazonaws.com
-// @connect      ibfkianxb0.execute-api.us-west-2.amazonaws.com
 // @connect      cloudforge-build.amazon.com
 // @connect      aha.bjs.aws-border.cn
 // @connect      cdnjs.cloudflare.com
 // @connect      cdn.jsdelivr.net
 // @connect      code.jquery.com
 // @connect      ajax.googleapis.com
-// @connect      midway-auth.aws-border.cn
 // @connect      sentry.amazon.com
 // @connect      sso.amazon.com
 // @connect      idp.amazon.com
 // @connect      *.aws-border.cn
 // @connect      *.amazon.com
-// @connect      ncfs-api.corp.amazon.com
 // @connect      s3.amazonaws.com
-// @connect      execute-api.us-west-2.amazonaws.com
-// @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius%20-%20SIN.user.js
-// @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius%20-%20SIN.user.js
-// ==/UserScript==
+// @connect      nova.amazon.com
+// @connect      ncfs-api.corp.amazon.com
+// @connect      ibfkianxb0.execute-api.us-west-2.amazonaws.com
+// @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
+// @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
 
+// ==/UserScript==
 (function() {
     'use strict';
-
-    // ==================== S3 API Configuration ====================
-    const S3_API_CONFIG = {
-        baseUrl: 'https://ibfkianxb0.execute-api.us-west-2.amazonaws.com/Test',
-        authToken: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiYmpzZGNlbyIsInR5cGUiOiJwZXJtYW5lbnQifQ.mKaIWhj_d7kxB8fwh2BDDGKMyVLrkiwZZzuZzc8ra6s',
-        endpoints: {
-            list: '/files',
-            upload: '/upload',
-            download: '/download',
-            delete: '/files'
-        }
-    };
 
     const loadExternalResources = async () => {
         if (typeof jQuery === 'undefined') {
@@ -80,239 +67,103 @@
         }
     };
 
+    const CONFIG = {
+        // 版本信息
+        VERSION: '1.61',
+        CLUSTER:'sin',
+
+        // API 端点配置
+        API_ENDPOINTS: {
+            LAMBDA_URL: 'https://twuukpz75g.execute-api.us-west-2.amazonaws.com/default/GetS3Data',
+        },
+
+        // 认证配置
+        AUTH: {
+            BEARER_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiYmpzZGNlbyIsInR5cGUiOiJwZXJtYW5lbnQifQ.mKaIWhj_d7kxB8fwh2BDDGKMyVLrkiwZZzuZzc8ra6s'
+        },
+
+        // Nova AI 配置
+        NOVA_API: {
+            API_KEY: '0aa6b5ea-313b-4bde-8646-e8d385ef681e',
+            BASE_URL: 'https://api.nova.amazon.com/v1',
+            MODEL: 'nova-2-lite-v1',
+            TEMPERATURE: 0.3,
+            MAX_TOKENS: 3000
+        },
+
+        // 站点列表配置
+        AVAILABLE_SITES: [
+            'SIN2', 'SIN3', 'SIN4', 'SIN50', 'SIN51', 'SIN52', 'SIN53', 'SIN54', 'SIN58',
+            'SIN62', 'SIN63', 'SIN64', 'SIN65', 'SIN66', 'SIN69',
+            'SIN78', 'SIN79', 'SIN81'
+        ],
+
+        // 筛选器选项配置
+        FILTER_OPTIONS: [
+            { label: 'Data Hall', column: 'Position Room' },
+            { label: 'Rack', column: 'Position', isPosition: true },
+            { label: 'PDU Name', column: 'PDU Name' },
+            { label: 'UPS Group', column: 'UPS Group' },
+            { label: 'USB', column: 'USB' },
+            { label: 'Transformer', column: 'routingInfo.transformer' },
+            { label: 'Utility', column: 'routingInfo.utility' },
+            { label: 'Power Feed', column: 'Power Feed' },
+            { label: 'Rack Status', column: 'status' },
+            { label: 'Rack Type', column: 'type' },
+            { label: 'Capacity', column: 'power_kva' }
+        ],
+
+        // 显示名称映射
+        DISPLAY_NAMES: {
+            'Lost Primary': 'At Risk - Primary Loss',
+            'Lost Secondary': 'At Risk - Secondary Loss',
+            'Partial Power Loss': 'At Risk - Partial Loss',
+            'Complete Power Loss': 'At Risk - Complete Loss'
+        },
+
+        // 机柜类型映射
+        RACK_TYPE_MAPPING: {
+                'NETWORK': 'Network', 'Security': 'Network', 'Fusion Even Prim': 'Network', 'Fusion Odd Prim': 'Network',
+                'Network Core - W': 'Network', 'Network Core - E': 'Network', 'BMS': 'Network', 'Network Edge': 'Network',
+                'AGG - EC2': 'Network', 'CHRONOS': 'Network', 'UMN': 'Network', 'Network Border': 'Network',
+                'Network Core': 'Network', 'Network Enterpri': 'Network', 'Network Manageme': 'Network',
+                'Network L7 - JLB': 'Network', 'Network Buffer': 'Network', 'Network Optical': 'Network',
+                'Network Aggregat': 'Network', 'Network VPC-DX': 'Network', 'Network Catzilla': 'Network',
+                'Network L7': 'Network', 'Network CI': 'Network', 'Network Enterprise': 'Network', 'Network Build': 'Network',
+                '12.8T ES BFC SP': 'Network', '12.8T BFC BR': 'Network', '12.8T ES EUC SP': 'Network', 'Fission': 'Network',
+                'WS BFC BR': 'Network', 'ES BFC SP': 'Network', 'AGG - PROD': 'Network', 'AGG-PROD': 'Network',
+                'Agg - Prod': 'Network', 'AGG - Prod': 'Network', 'AGG-EC2': 'Network', 'Agg - EC2': 'Network',
+                'PATO': 'Network', 'CI/NVR': 'Network', 'BFC BR': 'Network', 'Border': 'Network', 'Optical': 'Network',
+                'VPC': 'Network', 'STORM': 'Network', 'ES EUC SP': 'Network', 'ES BFC BR': 'Network', 'WS EUC SP': 'Network',
+                'WS BFC SP': 'Network', 'LBIR': 'Network', 'Fusion Secondary': 'Network', 'CI': 'Network',
+                'WS UMN': 'Network', 'ES UMN': 'Network', 'L7-JLB': 'Network', 'WMW Puffin Med': 'Network',
+                'IRON RACK': 'Network', 'Data Center Oper': 'Network', 'Bulk Fiber': 'Network', 'CloudFront': 'Network',
+                'Edge': 'Network', 'Corp': 'Network', 'DCO': 'Network', 'FPOD': 'Network', 'Migration Prog': 'Network',
+                'EC2': 'EC2', 'Enterprise': 'EC2', 'S3': 'EC2', 'EBS': 'EBS',
+                'Production': 'Production', 'AWS Prod': 'Production', 'AWS-Prod': 'Production', 'Bering Rack': 'Production',
+                'Bering Tape Rack': 'Production', 'SERVER': 'Production', 'Classic-Prod': 'Production',
+                'Classic Prod': 'Production', 'GPS': 'Production', 'AWS': 'Production',
+                'PATCH': 'Patch', 'NONRACK': 'NonRack', 'Thermal': 'Patch', 'ATS': 'Patch', 'IDF Row': 'Patch',
+                'Cabling Infrastr': 'Mini rack', 'OH_MINIRACK': 'Mini rack',
+        },
+
+        // S3 文件管理器配置
+        S3_API: {
+                BASE_URL: 'https://ibfkianxb0.execute-api.us-west-2.amazonaws.com/Test',
+                AUTH_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiYmpzZGNlbyIsInR5cGUiOiJwZXJtYW5lbnQifQ.mKaIWhj_d7kxB8fwh2BDDGKMyVLrkiwZZzuZzc8ra6s',
+                ENDPOINTS: {
+                    LIST: '/files',
+                    UPLOAD: '/upload',
+                    DOWNLOAD: '/download',
+                    DELETE: '/files'
+            }
+        },
+    };
+
     let SELECTED_SITE = '';
     let EXCEL_DATA = [];
     let positionMap = new Map();
     window.filteredPositions = {};
-    const LAMBDA_URL = 'https://twuukpz75g.execute-api.us-west-2.amazonaws.com/default/GetS3Data';
-
-    const AVAILABLE_SITES = [
-        'SIN2', 'SIN3', 'SIN4', 'SIN50', 'SIN51', 'SIN52', 'SIN53', 'SIN54', 'SIN58',
-        'SIN62', 'SIN63', 'SIN64', 'SIN65', 'SIN66', 'SIN69',
-        'SIN78', 'SIN79', 'SIN81',
-    ];
-
-    // ==================== S3 Manager Functions ====================
-    function showS3Status(message, type = 'info') {
-        const status = document.getElementById('s3-status');
-        if (!status) return;
-        status.textContent = message;
-        status.className = `s3-status ${type}`;
-        status.style.display = 'block';
-        setTimeout(() => status.style.display = 'none', 5000);
-    }
-
-    function formatBytes(bytes) {
-        if (bytes === 0) return '0 B';
-        const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-    }
-
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    function listS3Files() {
-        showS3Status('Loading files...', 'info');
-        const fileList = document.getElementById('s3-file-list');
-        if (fileList) {
-            fileList.innerHTML = '<div class="s3-loading">Loading...</div>';
-        }
-
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: `${S3_API_CONFIG.baseUrl}${S3_API_CONFIG.endpoints.list}`,
-            headers: {
-                'Authorization': S3_API_CONFIG.authToken,
-                'Content-Type': 'application/json'
-            },
-            onload: (response) => {
-                try {
-                    const data = JSON.parse(response.responseText);
-                    const files = data.body?.files || data.files || [];
-                    displayS3Files(files);
-                    showS3Status(`✅ Loaded ${files.length} files`, 'success');
-                } catch (e) {
-                    showS3Status('❌ Failed to parse response', 'error');
-                    if (fileList) {
-                        fileList.innerHTML = '<div class="s3-empty-state">Failed to load files</div>';
-                    }
-                }
-            },
-            onerror: () => {
-                showS3Status('❌ Network error', 'error');
-                if (fileList) {
-                    fileList.innerHTML = '<div class="s3-empty-state">Network error</div>';
-                }
-            }
-        });
-    }
-
-    function displayS3Files(files) {
-        const fileList = document.getElementById('s3-file-list');
-        if (!fileList) return;
-
-        if (files.length === 0) {
-            fileList.innerHTML = '<div class="s3-empty-state">📂 No files in bucket</div>';
-            return;
-        }
-
-        fileList.innerHTML = `
-            <table class="s3-file-table">
-                <thead>
-                    <tr>
-                        <th>File Name</th>
-                        <th>Size</th>
-                        <th>Last Modified</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${files.map(file => `
-                        <tr class="s3-file-row">
-                            <td class="s3-file-name">${escapeHtml(file.key)}</td>
-                            <td class="s3-file-size">${formatBytes(file.size)}</td>
-                            <td class="s3-file-date">${new Date(file.last_modified).toLocaleString()}</td>
-                            <td class="s3-file-actions">
-                                <button class="s3-action-btn s3-download-btn" data-key="${escapeHtml(file.key)}" title="Download">⬇️</button>
-                                <button class="s3-action-btn s3-delete-btn" data-key="${escapeHtml(file.key)}" title="Delete">🗑️</button>
-                            </td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        `;
-
-        fileList.querySelectorAll('.s3-download-btn').forEach(btn => {
-            btn.addEventListener('click', () => downloadS3File(btn.dataset.key));
-        });
-        fileList.querySelectorAll('.s3-delete-btn').forEach(btn => {
-            btn.addEventListener('click', () => deleteS3File(btn.dataset.key));
-        });
-    }
-
-    function downloadS3File(key) {
-        showS3Status('Generating download link...', 'info');
-
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: `${S3_API_CONFIG.baseUrl}${S3_API_CONFIG.endpoints.download}/${encodeURIComponent(key)}`,
-            headers: {
-                'Authorization': S3_API_CONFIG.authToken,
-                'Content-Type': 'application/json'
-            },
-            onload: (response) => {
-                try {
-                    const data = JSON.parse(response.responseText);
-                    const downloadUrl = data.body?.download_url || data.download_url;
-                    if (downloadUrl) {
-                        window.open(downloadUrl, '_blank');
-                        showS3Status('✅ Download started', 'success');
-                    } else {
-                        showS3Status('❌ No download URL returned', 'error');
-                    }
-                } catch (e) {
-                    showS3Status('❌ Failed to get download link', 'error');
-                }
-            },
-            onerror: () => showS3Status('❌ Network error', 'error')
-        });
-    }
-
-    function deleteS3File(key) {
-        if (!confirm(`Are you sure you want to delete "${key}"?`)) return;
-
-        showS3Status('Deleting file...', 'info');
-
-        GM_xmlhttpRequest({
-            method: 'DELETE',
-            url: `${S3_API_CONFIG.baseUrl}${S3_API_CONFIG.endpoints.delete}/${encodeURIComponent(key)}`,
-            headers: {
-                'Authorization': S3_API_CONFIG.authToken,
-                'Content-Type': 'application/json'
-            },
-            onload: (response) => {
-                try {
-                    const data = JSON.parse(response.responseText);
-                    if (data.body?.success || data.success) {
-                        showS3Status('✅ File deleted successfully', 'success');
-                        listS3Files();
-                    } else {
-                        showS3Status('❌ Failed to delete file', 'error');
-                    }
-                } catch (e) {
-                    showS3Status('❌ Error processing response', 'error');
-                }
-            },
-            onerror: () => showS3Status('❌ Network error', 'error')
-        });
-    }
-
-    function uploadS3Files() {
-        const fileInput = document.getElementById('s3-file-upload');
-        if (!fileInput || fileInput.files.length === 0) {
-            showS3Status('⚠️ Please select files to upload', 'info');
-            return;
-        }
-
-        const files = Array.from(fileInput.files);
-        showS3Status(`Uploading ${files.length} file(s)...`, 'info');
-
-        let completed = 0;
-        let failed = 0;
-
-        files.forEach(file => {
-            const reader = new FileReader();
-            reader.onerror = () => {
-                failed++;
-                if (completed + failed === files.length) {
-                    showS3Status(`Completed: ${completed} success, ${failed} failed`, failed > 0 ? 'error' : 'success');
-                    if (completed > 0) listS3Files();
-                }
-            };
-            reader.onload = (e) => {
-                const base64 = btoa(new Uint8Array(e.target.result).reduce((d, b) => d + String.fromCharCode(b), ''));
-
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: `${S3_API_CONFIG.baseUrl}${S3_API_CONFIG.endpoints.upload}`,
-                    headers: {
-                        'Authorization': S3_API_CONFIG.authToken,
-                        'Content-Type': 'application/json'
-                    },
-                    data: JSON.stringify({
-                        key: file.name,
-                        content: base64,
-                        content_type: file.type || 'application/octet-stream'
-                    }),
-                    onload: (response) => {
-                        if (response.status === 200) {
-                            completed++;
-                        } else {
-                            failed++;
-                        }
-                        if (completed + failed === files.length) {
-                            showS3Status(`✅ Upload complete: ${completed} success, ${failed} failed`, failed > 0 ? 'error' : 'success');
-                            if (completed > 0) listS3Files();
-                        }
-                    },
-                    onerror: () => {
-                        failed++;
-                        if (completed + failed === files.length) {
-                            showS3Status(`Upload complete: ${completed} success, ${failed} failed`, 'error');
-                            if (completed > 0) listS3Files();
-                        }
-                    }
-                });
-            };
-            reader.readAsArrayBuffer(file);
-        });
-
-        fileInput.value = '';
-    }
 
     // 设置界面函数
     function setupInterface() {
@@ -328,46 +179,15 @@
         const siteSection = document.createElement('div');
         siteSection.className = 'site-selection-section';
         siteSection.innerHTML = `
-            <h2>Select Data Center Site (v1.53)</h2>
+            <h2>Select Data Center Site</h2>
             <div class="custom-dropdown">
-                <div class="selected-option" tabindex="0">Select a Site</div>
+                <div class="selected-option" tabindex="0">Select a Site(${CONFIG.VERSION})</div>
                 <ul class="dropdown-options">
-                    ${AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
+                    ${CONFIG.AVAILABLE_SITES.map(site => `<li data-value="${site}">${site}</li>`).join('')}
                 </ul>
             </div>
         `;
         container.appendChild(siteSection);
-
-        // S3 Manager 区域 - 默认显示但折叠
-        const s3ManagerSection = document.createElement('div');
-        s3ManagerSection.className = 's3-manager-container collapsed';
-        s3ManagerSection.innerHTML = `
-            <div class="s3-manager-header">
-                <div class="s3-manager-title">
-                    <span class="s3-icon">📦</span>
-                    <span>S3 Bucket Manager</span>
-                </div>
-                <div class="s3-manager-toggle">▼</div>
-            </div>
-            <div class="s3-manager-content">
-                <div class="s3-toolbar">
-                    <div class="s3-upload-section">
-                        <input type="file" id="s3-file-upload" multiple class="s3-file-input">
-                        <button class="s3-button s3-upload-btn" id="s3-upload-btn">
-                            <span>⬆️</span> Upload
-                        </button>
-                    </div>
-                    <button class="s3-button s3-refresh-btn" id="s3-refresh-btn">
-                        <span>🔄</span> Refresh
-                    </button>
-                </div>
-                <div id="s3-status" class="s3-status" style="display: none;"></div>
-                <div id="s3-file-list" class="s3-file-list">
-                    <div class="s3-empty-state">Click "Refresh" to load files</div>
-                </div>
-            </div>
-        `;
-        container.appendChild(s3ManagerSection);
 
         // Tips 容器 - 默认显示但折叠
         const tipsContainer = document.createElement('div');
@@ -382,13 +202,12 @@
             </div>
             <div class="tips-content">
                 <ul class="tips-list">
-                    <li><strong>Summary Table：</strong>Currently, the table only includes deployed racks; Patch racks are excluded.</li>
-                    <li><strong>Detail Info：</strong>Non-rack and Mini-rack locations have been automatically filtered from the floorplan.</li>
-                    <li><strong>Click to view：</strong>Click cells in the Summary Table to view detailed rack listings.</li>
+                    <li><strong>Summary Table:</strong> Only deployed racks are counted. Patch racks are excluded.</li>
+                    <li><strong>Detail Info:</strong> Non-rack and Mini-rack positions are automatically filtered out.</li>
+                    <li><strong>Click to view:</strong> Click numbers in the Summary Table to see detailed rack lists.</li>
                 </ul>
             </div>
         `;
-        container.appendChild(tipsContainer);
 
         // 模态框
         const modalContainer = document.createElement('div');
@@ -532,51 +351,411 @@
         });
 
         // Tips 折叠
-        const tipsHeader = container.querySelector('.tips-header');
+        const tipsHeader = tipsContainer.querySelector('.tips-header');
         if (tipsHeader) {
             tipsHeader.addEventListener('click', function() {
-                const tipsContainer = this.closest('.tips-container');
                 tipsContainer.classList.toggle('collapsed');
             });
         }
 
-        // S3 Manager 折叠
-        const s3ManagerHeader = container.querySelector('.s3-manager-header');
-        if (s3ManagerHeader) {
-            s3ManagerHeader.addEventListener('click', function() {
-                const s3Container = this.closest('.s3-manager-container');
-                s3Container.classList.toggle('collapsed');
-            });
-        }
+        // AI Assistant
+        const aiQuerySection = document.createElement('div');
+        aiQuerySection.className = 'ai-query-section collapsed';
+        aiQuerySection.innerHTML = `
+            <div class="ai-query-header">
+                <div class="ai-query-title">
+                    <span>AI Search</span>
+                </div>
+                <div class="ai-toggle">▼</div>
+            </div>
+            <div class="ai-query-content">
+                <div class="ai-query-container">
+                    <div class="ai-input-wrapper">
+                        <textarea
+                            id="aiQueryInput"
+                            class="ai-query-input"
+                            placeholder="How many racks would be affected by a UPS-A failure?"
+                            rows="2"
+                        ></textarea>
+                        <div class="ai-buttons-group" style="display: flex; flex-direction: column; gap: 6px;">
+                            <button id="aiQueryBtn" class="ai-query-button">
+                                <span class="ai-icon">🔍</span> Query
+                            </button>
+                            <button id="aiAnalyzeBtn" class="ai-analyze-btn" onclick="analyzeCurrentResults()">
+                                <span>📊</span> AI Analyze
+                            </button>
+                        </div>
+                    </div>
+                    <div id="aiQueryResult" class="ai-query-result" style="display: none;"></div>
+                    <div id="aiAnalysisResult" class="ai-analysis-container" style="display: none;"></div>
+                    <div class="ai-query-examples">
+                        <span class="examples-label">💡 Examples：</span>
+                        <button class="example-query" data-query="Show all deployed racks in data hall 2-1">2-1 deployed racks</button>
+                        <button class="example-query" data-query="Which Network type racks are connected to Transformer-A?">Network + Transformer-A</button>
+                        <button class="example-query" data-query="Which racks have all circuits on the same transformer?">Same transformer for Pri/Sec</button>
+                    </div>
+                </div>
+            </div>
+        `;
 
-        // S3 按钮事件
-        const s3RefreshBtn = container.querySelector('#s3-refresh-btn');
-        if (s3RefreshBtn) {
-            s3RefreshBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                listS3Files();
-            });
-        }
+        // === 功能模块插入到 siteSection 之后（modalContainer 之前）===
+        const insertAnchor = container.querySelector('.modal-backdrop').parentElement;
 
-        const s3UploadBtn = container.querySelector('#s3-upload-btn');
-        if (s3UploadBtn) {
-            s3UploadBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                uploadS3Files();
-            });
-        }
+        // 1. S3 Manager（最上）
+        const s3ManagerContainer = document.createElement('div');
+        s3ManagerContainer.innerHTML = S3ManagerModule.getHTML();
+        container.insertBefore(s3ManagerContainer.firstElementChild, insertAnchor);
 
-        const s3FileInput = container.querySelector('#s3-file-upload');
-        if (s3FileInput) {
-            s3FileInput.addEventListener('click', (e) => {
-                e.stopPropagation();
-            });
-        }
+        // 2. Tips（居中）
+        container.insertBefore(tipsContainer, insertAnchor);
+
+        // 3. AI Search（最下）
+        container.insertBefore(aiQuerySection, insertAnchor);
 
         return container;
     }
 
-    // ==================== CSV 解析函数 ====================
+
+    // ==================== S3 Manager 独立模块 ====================
+    const S3ManagerModule = {
+        // 初始化模块
+        init() {
+            this.bindEvents();
+            console.log('[S3Manager] Module initialized');
+        },
+
+        // 绑定事件
+        bindEvents() {
+            // S3 Manager 折叠/展开
+            const s3Header = document.querySelector('.s3-manager-header');
+            if (s3Header) {
+                s3Header.addEventListener('click', function() {
+                    const s3Container = this.closest('.s3-manager-container');
+                    s3Container.classList.toggle('collapsed');
+                });
+            }
+
+            // 上传按钮
+            const uploadBtn = document.getElementById('s3-upload-btn');
+            if (uploadBtn) {
+                uploadBtn.addEventListener('click', () => this.uploadFiles());
+            }
+
+            // 刷新按钮
+            const refreshBtn = document.getElementById('s3-refresh-btn');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', () => this.listFiles());
+            }
+        },
+
+        // 显示状态消息
+        showStatus(message, type = 'info') {
+            const status = document.getElementById('s3-status');
+            if (!status) return;
+            status.textContent = message;
+            status.className = `s3-status ${type}`;
+            status.style.display = 'block';
+            setTimeout(() => status.style.display = 'none', 5000);
+        },
+
+        // 格式化文件大小
+        formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        },
+
+        // HTML 转义
+        escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        },
+
+        // 列出 S3 文件
+        listFiles() {
+            this.showStatus('Loading files...', 'info');
+            const fileList = document.getElementById('s3-file-list');
+            if (fileList) {
+                fileList.innerHTML = '<div class="s3-loading">Loading...</div>';
+            }
+
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: `${CONFIG.S3_API.BASE_URL}${CONFIG.S3_API.ENDPOINTS.LIST}`,
+                headers: {
+                    'Authorization': CONFIG.S3_API.AUTH_TOKEN,
+                    'Content-Type': 'application/json'
+                },
+                onload: (response) => {
+                    try {
+                        const data = JSON.parse(response.responseText);
+                        const files = data.body?.files || data.files || [];
+                        this.displayFiles(files);
+                        this.showStatus(`✓ Loaded ${files.length} files`, 'success');
+                    } catch (e) {
+                        this.showStatus('✗ Failed to parse response', 'error');
+                        if (fileList) {
+                            fileList.innerHTML = '<div class="s3-empty-state">Failed to load files</div>';
+                        }
+                    }
+                },
+                onerror: () => {
+                    this.showStatus('✗ Network error', 'error');
+                    if (fileList) {
+                        fileList.innerHTML = '<div class="s3-empty-state">Network error</div>';
+                    }
+                }
+            });
+        },
+
+        // 显示文件列表
+        displayFiles(files) {
+            const fileList = document.getElementById('s3-file-list');
+            if (!fileList) return;
+
+            if (files.length === 0) {
+                fileList.innerHTML = '<div class="s3-empty-state">📭 No files in bucket</div>';
+                return;
+            }
+
+            fileList.innerHTML = `
+                <table class="s3-file-table">
+                    <thead>
+                        <tr>
+                            <th>File Name</th>
+                            <th>Size</th>
+                            <th>Last Modified</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${files.map(file => `
+                            <tr class="s3-file-row">
+                                <td class="s3-file-name">${this.escapeHtml(file.key)}</td>
+                                <td class="s3-file-size">${this.formatBytes(file.size)}</td>
+                                <td class="s3-file-date">${new Date(file.last_modified).toLocaleString()}</td>
+                                <td class="s3-file-actions">
+                                    <button class="s3-action-btn s3-download-btn" data-key="${this.escapeHtml(file.key)}" title="Download">⬇️</button>
+                                    <button class="s3-action-btn s3-delete-btn" data-key="${this.escapeHtml(file.key)}" title="Delete">🗑️</button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            fileList.querySelectorAll('.s3-download-btn').forEach(btn => {
+                btn.addEventListener('click', () => this.downloadFile(btn.dataset.key));
+            });
+            fileList.querySelectorAll('.s3-delete-btn').forEach(btn => {
+                btn.addEventListener('click', () => this.deleteFile(btn.dataset.key));
+            });
+        },
+
+        // 下载文件
+        downloadFile(key) {
+            this.showStatus('Generating download link...', 'info');
+
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: `${CONFIG.S3_API.BASE_URL}${CONFIG.S3_API.ENDPOINTS.DOWNLOAD}/${encodeURIComponent(key)}`,
+                headers: {
+                    'Authorization': CONFIG.S3_API.AUTH_TOKEN,
+                    'Content-Type': 'application/json'
+                },
+                onload: (response) => {
+                    try {
+                        const data = JSON.parse(response.responseText);
+                        const downloadUrl = data.body?.download_url || data.download_url;
+                        if (downloadUrl) {
+                            window.open(downloadUrl, '_blank');
+                            this.showStatus('✓ Download started', 'success');
+                        } else {
+                            this.showStatus('✗ No download URL returned', 'error');
+                        }
+                    } catch (e) {
+                        this.showStatus('✗ Failed to get download link', 'error');
+                    }
+                },
+                onerror: () => this.showStatus('✗ Network error', 'error')
+            });
+        },
+
+        // 删除文件
+        deleteFile(key) {
+            if (!confirm(`Are you sure you want to delete "${key}"?`)) return;
+
+            this.showStatus('Deleting file...', 'info');
+
+            GM_xmlhttpRequest({
+                method: 'DELETE',
+                url: `${CONFIG.S3_API.BASE_URL}${CONFIG.S3_API.ENDPOINTS.DELETE}/${encodeURIComponent(key)}`,
+                headers: {
+                    'Authorization': CONFIG.S3_API.AUTH_TOKEN,
+                    'Content-Type': 'application/json'
+                },
+                onload: (response) => {
+                    try {
+                        const data = JSON.parse(response.responseText);
+                        if (data.body?.success || data.success) {
+                            this.showStatus('✓ File deleted successfully', 'success');
+                            this.listFiles();
+                        } else {
+                            this.showStatus('✗ Failed to delete file', 'error');
+                        }
+                    } catch (e) {
+                        this.showStatus('✗ Error processing response', 'error');
+                    }
+                },
+                onerror: () => this.showStatus('✗ Network error', 'error')
+            });
+        },
+
+        // 上传文件
+        uploadFiles() {
+            const fileInput = document.getElementById('s3-file-upload');
+            if (!fileInput || fileInput.files.length === 0) {
+                this.showStatus('⚠️ Please select files to upload', 'error');
+                return;
+            }
+
+            const files = Array.from(fileInput.files);
+            let uploadedCount = 0;
+            const totalFiles = files.length;
+
+            this.showStatus(`Uploading ${totalFiles} file(s)...`, 'info');
+
+            files.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const base64Content = e.target.result.split(',')[1];
+
+                    GM_xmlhttpRequest({
+                        method: 'POST',
+                        url: `${CONFIG.S3_API.BASE_URL}${CONFIG.S3_API.ENDPOINTS.UPLOAD}`,
+                        headers: {
+                            'Authorization': CONFIG.S3_API.AUTH_TOKEN,
+                            'Content-Type': 'application/json'
+                        },
+                        data: JSON.stringify({
+                            filename: file.name,
+                            content: base64Content,
+                            content_type: file.type || 'application/octet-stream'
+                        }),
+                        onload: (response) => {
+                            uploadedCount++;
+                            try {
+                                const data = JSON.parse(response.responseText);
+                                if (uploadedCount === totalFiles) {
+                                    this.showStatus(`✓ ${totalFiles} file(s) uploaded successfully`, 'success');
+                                    fileInput.value = '';
+                                    this.listFiles();
+                                }
+                            } catch (e) {
+                                if (uploadedCount === totalFiles) {
+                                    this.showStatus('✗ Error processing upload response', 'error');
+                                }
+                            }
+                        },
+                        onerror: () => {
+                            uploadedCount++;
+                            if (uploadedCount === totalFiles) {
+                                this.showStatus('✗ Network error during upload', 'error');
+                            }
+                        }
+                    });
+                };
+                reader.readAsDataURL(file);
+            });
+        },
+
+        // 生成 S3 Manager 的 HTML 模板
+        getHTML() {
+            return `
+                <div class="s3-manager-container collapsed">
+                    <div class="s3-manager-header">
+                        <div class="s3-manager-title">
+                            <span class="s3-manager-icon">📁</span>
+                            <span>S3 Bucket Manager</span>
+                        </div>
+                        <div class="s3-manager-toggle">▼</div>
+                    </div>
+                    <div class="s3-manager-content">
+                        <div id="s3-status" class="s3-status" style="display:none;"></div>
+                        <div class="s3-upload-section">
+                            <input type="file" id="s3-file-upload" multiple class="s3-file-input" />
+                            <button id="s3-upload-btn" class="s3-btn s3-btn-upload">📤 Upload</button>
+                            <button id="s3-refresh-btn" class="s3-btn s3-btn-refresh">🔄 Refresh</button>
+                        </div>
+                        <div id="s3-file-list" class="s3-file-list">
+                            <div class="s3-empty-state">Click 🔄 Refresh to load files</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    };
+
+    /**
+     * 设置 AI 助手相关的事件监听器
+     */
+    function setupAIEventListeners() {
+        // AI 查询按钮
+        const aiQueryBtn = document.getElementById('aiQueryBtn');
+        if (aiQueryBtn) {
+            aiQueryBtn.addEventListener('click', executeAIQuery);
+        }
+
+        // AI 输入框回车键
+        const aiQueryInput = document.getElementById('aiQueryInput');
+        if (aiQueryInput) {
+            aiQueryInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    executeAIQuery();
+                }
+            });
+        }
+
+        // 示例查询按钮
+        document.querySelectorAll('.example-query').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const input = document.getElementById('aiQueryInput');
+                if (input) {
+                    input.value = this.dataset.query;
+                }
+            });
+        });
+
+        // AI 折叠功能
+        const aiHeader = document.querySelector('.ai-query-header');
+        if (aiHeader) {
+            aiHeader.addEventListener('click', function() {
+                const aiSection = this.closest('.ai-query-section');
+                aiSection.classList.toggle('collapsed');
+            }
+        )};
+
+        // 事件委托处理动态按钮
+        document.addEventListener('click', function(e) {
+            if (e.target.closest('.ai-analyze-btn')) {
+                e.preventDefault();
+                analyzeCurrentResults();
+            }
+
+            if (e.target.closest('.ai-clear-filters')) {
+                e.preventDefault();
+                clearAllFilters();
+            }
+
+            if (e.target.closest('.close-analysis')) {
+                e.preventDefault();
+                closeAnalysis();
+            }
+        });
+    }
 
     function parseCSVContent(csvText) {
         console.log('[CSV Parser] Input type:', typeof csvText);
@@ -682,19 +861,18 @@
     async function loadDataFromLambda(site) {
         console.log('========================================');
         console.log('[LoadData] Starting load for site:', site);
-        console.log('[LoadData] Lambda URL:', LAMBDA_URL);
-        console.log('========================================');
+        console.log('[LoadData] Lambda URL:', CONFIG.API_ENDPOINTS.LAMBDA_URL);
 
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST",
-                url: LAMBDA_URL,
+                url: CONFIG.API_ENDPOINTS.LAMBDA_URL,
                 headers: {
                     "Content-Type": "application/json",
                     "Accept": "application/json",
-                    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiYmpzZGNlbyIsInR5cGUiOiJwZXJtYW5lbnQifQ.mKaIWhj_d7kxB8fwh2BDDGKMyVLrkiwZZzuZzc8ra6s",
+                    "Authorization": CONFIG.AUTH.BEARER_TOKEN,
                 },
-                data: JSON.stringify({ site: site, cluster: 'sin' }),
+                data: JSON.stringify({ site: site, cluster: CONFIG.CLUSTER}),
                 onload: function(response) {
                     console.log('[LoadData] Response received');
                     console.log('[LoadData] Status:', response.status);
@@ -751,7 +929,6 @@
                                     onload: (r) => {
                                         if (r.status === 200) {
                                             console.log('[LoadData] Primary CSV fetched successfully');
-                                            // 去除 UTF-8 BOM（EF BB BF）
                                             let text = r.responseText;
                                             if (text.charCodeAt(0) === 0xFEFF) {
                                                 text = text.slice(1);
@@ -888,24 +1065,6 @@
         });
     }
 
-
-
-    function getFilterOptions() {
-        return [
-            { label: 'Data Hall', column: 'Position Room' },
-            { label: 'Rack', column: 'Position', isPosition: true },
-            { label: 'PDU Name', column: 'PDU Name' },
-            { label: 'UPS Group', column: 'UPS Group' },
-            { label: 'USB', column: 'USB' },
-            { label: 'Transformer', column: 'routingInfo.transformer' },
-            { label: 'Utility', column: 'routingInfo.utility' },
-            { label: 'Power Feed', column: 'Power Feed' },
-            { label: 'Rack Status', column: 'status' },
-            { label: 'Rack Type', column: 'type' },
-            { label: 'Capacity', column: 'power_kva' }
-        ];
-    }
-
     window.ahaLoginWindowOpened = false;
 
     function makeRequest(url, method, retryCount = 0) {
@@ -958,32 +1117,62 @@
         });
     }
 
-    // ==================== Part 3 开始 ====================
+    async function callNovaAPI(messages, temperature = CONFIG.NOVA_API.TEMPERATURE) {
+        try {
+            const response = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: `${CONFIG.NOVA_API.BASE_URL}/chat/completions`,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${CONFIG.NOVA_API.API_KEY}`
+                    },
+                    data: JSON.stringify({
+                        model: CONFIG.NOVA_API.MODEL,
+                        messages: messages,
+                        temperature: temperature,
+                        max_tokens: CONFIG.NOVA_API.MAX_TOKENS
+                    }),
+                    onload: resolve,
+                    onerror: reject
+                });
+            });
 
-    const RACK_TYPE_MAPPING = {
-        'NETWORK': 'Network', 'Security': 'Network', 'Fusion Even Prim': 'Network', 'Fusion Odd Prim': 'Network',
-        'Network Core - W': 'Network', 'Network Core - E': 'Network', 'BMS': 'Network', 'Network Edge': 'Network',
-        'AGG - EC2': 'Network', 'CHRONOS': 'Network', 'UMN': 'Network', 'Network Border': 'Network',
-        'Network Core': 'Network', 'Network Enterpri': 'Network', 'Network Manageme': 'Network',
-        'Network L7 - JLB': 'Network', 'Network Buffer': 'Network', 'Network Optical': 'Network',
-        'Network Aggregat': 'Network', 'Network VPC-DX': 'Network', 'Network Catzilla': 'Network',
-        'Network L7': 'Network', 'Network CI': 'Network', 'Network Enterprise': 'Network', 'Network Build': 'Network',
-        '12.8T ES BFC SP': 'Network', '12.8T BFC BR': 'Network', '12.8T ES EUC SP': 'Network', 'Fission': 'Network',
-        'WS BFC BR': 'Network', 'ES BFC SP': 'Network', 'AGG - PROD': 'Network', 'AGG-PROD': 'Network',
-        'Agg - Prod': 'Network', 'AGG - Prod': 'Network', 'AGG-EC2': 'Network', 'Agg - EC2': 'Network',
-        'PATO': 'Network', 'CI/NVR': 'Network', 'BFC BR': 'Network', 'Border': 'Network', 'Optical': 'Network',
-        'VPC': 'Network', 'STORM': 'Network', 'ES EUC SP': 'Network', 'ES BFC BR': 'Network', 'WS EUC SP': 'Network',
-        'WS BFC SP': 'Network', 'LBIR': 'Network', 'Fusion Secondary': 'Network', 'CI': 'Network',
-        'WS UMN': 'Network', 'ES UMN': 'Network', 'L7-JLB': 'Network', 'WMW Puffin Med': 'Network',
-        'IRON RACK': 'Network', 'Data Center Oper': 'Network', 'Bulk Fiber': 'Network', 'CloudFront': 'Network',
-        'Edge': 'Network', 'Corp': 'Network', 'DCO': 'Network', 'FPOD': 'Network', 'Migration Prog': 'Network',
-        'EC2': 'EC2', 'Enterprise': 'EC2', 'S3': 'EC2', 'EBS': 'EBS',
-        'Production': 'Production', 'AWS Prod': 'Production', 'AWS-Prod': 'Production', 'Bering Rack': 'Production',
-        'Bering Tape Rack': 'Production', 'SERVER': 'Production', 'Classic-Prod': 'Production',
-        'Classic Prod': 'Production', 'GPS': 'Production', 'AWS': 'Production',
-        'PATCH': 'Patch', 'NONRACK': 'NonRack', 'Thermal': 'Patch', 'ATS': 'Patch', 'IDF Row': 'Patch',
-        'Cabling Infrastr': 'Mini rack', 'OH_MINIRACK': 'Mini rack',
-    };
+            // 检查 HTTP 状态
+            if (response.status !== 200) {
+                console.error('HTTP Error:', response.status, response.statusText);
+                console.error('Response:', response.responseText);
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            // 解析 JSON
+            const result = JSON.parse(response.responseText);
+            console.log('API Response:', result);  // 调试用
+            console.log('判断条件:', result.choices && result.choices.length > 0 && result.choices.message);
+            console.log('判断条件1:', result.choices);
+            console.log('判断条件2:', result.choices.length > 0);
+            console.log('判断条件3:', result.choices[0].message.content);
+
+            // 检查响应结构
+            if (result.choices.length > 0) {
+                return {
+                    success: true,
+                    content: result.choices[0].message.content,  // ✅ 修正：添加
+                    usage: result.usage
+                };
+            } else {
+                console.error('Invalid response structure:', result);
+                throw new Error('Invalid API response structure');
+            }
+        } catch (error) {
+            console.error('Nova API 调用失败:', error);
+            console.error('Error details:', error.message);
+            return {
+                success: false,
+                error: error.message || 'API 调用失败'
+            };
+        }
+    }
 
     async function fetchPositionInfo(site) {
         const urls = {
@@ -1073,7 +1262,7 @@
 
                     let rackType = 'unknown';
                     if (item.intended_customer) {
-                        rackType = RACK_TYPE_MAPPING[item.intended_customer] || 'unknown';
+                        rackType = CONFIG.RACK_TYPE_MAPPING[item.intended_customer] || 'unknown';
                         if (rackType === 'unknown' || item.intended_customer === 'ANY') rackType = item.uplink_fabric.toUpperCase();
                         if (rackType === 'Network' && parseFloat(item.power_kva) === 0) rackType = 'Patch';
                     }
@@ -1108,7 +1297,7 @@
 
     function initializeFilters(filtersContainer, stats) {
         filtersContainer.innerHTML = '';
-        const filters = getFilterOptions();
+        const filters = CONFIG.FILTER_OPTIONS;
 
         filters.forEach(filter => {
             const filterSection = document.createElement('div');
@@ -1205,8 +1394,6 @@
 
         return activeFilters;
     }
-
-    // ==================== Part 4a 开始 ====================
 
     async function updateDisplay(filters) {
         window.updateProgress = (progress) => {
@@ -1563,23 +1750,23 @@
 
                     if (redundancy === '2N' || redundancy === 'N+C') {
                         if (!hasDualPower) {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && expected.primary > 0) result.push(position.position);
-                            else if (metric === 'Lost Primary' && remainingPrimary < expected.primary && remainingPrimary > 0) result.push(position.position);
+                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && expected.primary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Primary' && remainingPrimary < expected.primary && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
                         } else {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(position.position);
-                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(position.position);
-                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(position.position);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(position.position);
+                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
                         }
                     } else {
                         if (!hasDualPower) {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0 && (expected.primary > 0 || expected.secondary > 0)) result.push(position.position);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary) result.push(position.position);
+                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0 && (expected.primary > 0 || expected.secondary > 0)) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary) result.push(`${position.room} ${position.position}`);
                         } else {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(position.position);
-                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(position.position);
-                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(position.position);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(position.position);
+                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
                         }
                     }
                 });
@@ -1593,7 +1780,7 @@
                 const euclidCount = positions.filter(position => {
                     const matchingKey = Object.keys(window.filteredPositions).find(key => {
                         const pos = window.filteredPositions[key];
-                        return pos.position === position && positionMap.get(key)?.type?.toUpperCase() === type;
+                        return `${pos.room} ${pos.position}` === position && positionMap.get(key)?.type?.toUpperCase() === type;
                     });
                     if (!matchingKey) return false;
                     return positionMap.get(matchingKey)?.is_brick === true;
@@ -1621,7 +1808,7 @@
                         <table class="stats-table">
                             <thead>
                                 <tr>
-                                    <th>Power Status</th>
+                                    <th>Potential Power Impact</th>
                                     ${activeRackTypes.filter(type => type !== 'PATCH').map(type => `<th>${type === 'NETWORK' ? 'NETWORK(Euclid)' : type}</th>`).join('')}
                                     <th>Total</th>
                                 </tr>
@@ -1633,8 +1820,9 @@
                                         const positionsArray = getPositionsForMetric(window.positions, type, metric);
                                         return generateStatsCell(type, metric, total, positionsArray);
                                     });
+                                    const displayName = CONFIG.DISPLAY_NAMES[metric];
                                     const rowTotal = activeRackTypes.filter(type => type !== 'PATCH').reduce((sum, type) => sum + (stats.detailedStats[type][metric] || 0), 0);
-                                    return `<tr><td>${metric}</td>${rowValues.join('')}<td class="stats-cell">${rowTotal}</td></tr>`;
+                                    return `<tr><td>${displayName}</td>${rowValues.join('')}<td class="stats-cell">${rowTotal}</td></tr>`;
                                 }).join('')}
                                 <tr class="total-row">
                                     <td>Total</td>
@@ -1736,6 +1924,11 @@
                 ${statsHtml}
                 ${positionsCountHtml}
                 <h3 class="section-title detail-title">Detail Info</h3>
+                <div class="export-button-container">
+                    <button id="exportDetailBtn" class="copy-positions-button">
+                        <span class="export-icon">📋</span> Copy
+                    </button>
+                </div>
                 <div class="positions-container">${positionsHtml}</div>
             `;
 
@@ -1752,6 +1945,7 @@
 
             setupModalEvents();
             setupExportButton();
+            setupExportDetailButton();
             setupLogicToggle();
 
         } catch (error) {
@@ -1786,7 +1980,7 @@
             });
         });
     }
-    
+
     function setupExportButton() {
         const exportBtn = document.getElementById('exportStatsBtn');
         if (exportBtn) {
@@ -1794,15 +1988,15 @@
                 // 获取当前显示的统计表格数据
                 const statsTable = document.querySelector('.stats-details .stats-table');
                 if (!statsTable) return;
-    
+
                 // 提取表头
                 const headers = Array.from(statsTable.querySelectorAll('thead th')).map(th => th.textContent.trim());
-    
+
                 // 提取数据行
                 const rows = Array.from(statsTable.querySelectorAll('tbody tr')).map(tr => {
                     return Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim());
                 });
-    
+
                 // 生成 Markdown 表格
                 let markdown = `| ${headers.join(' | ')} |
     `;
@@ -1812,7 +2006,7 @@
                     markdown += `| ${row.join(' | ')} |
     `;
                 });
-    
+
                 navigator.clipboard.writeText(markdown).then(() => {
                     exportBtn.innerHTML = '<span class="export-icon">✓</span> Copied!';
                     exportBtn.classList.add('copied');
@@ -1822,14 +2016,70 @@
                     }, 3000);
                 }).catch(err => {
                     console.error('Failed to copy:', err);
-                    alert('Failed to copy，please retry');
+                    alert('复制失败，请重试');
                 });
             });
         }
     }
 
+    function setupExportDetailButton() {
+        const exportDetailBtn = document.getElementById('exportDetailBtn');
+        if (exportDetailBtn) {
+            exportDetailBtn.addEventListener('click', () => {
+                const headers = ['Room', 'Position', 'Type', 'Redundancy', 'Status', 'Circuits', 'Capacity (kVA)'];
+                const rows = [];
 
-    // ==================== Part 4b 开始 ====================
+                document.querySelectorAll('.topo-item').forEach(item => {
+                    const posIdEl = item.querySelector('.position-id');
+                    if (!posIdEl) return;
+                    const posIdText = posIdEl.textContent.trim().split(/\s+/);
+                    const room = posIdText || 'N/A';
+                    const pos = posIdText.slice(1).join(' ') || 'N/A';
+
+                    const typeEl = item.querySelector('.rack-type');
+                    const type = typeEl ? typeEl.textContent.trim() : 'N/A';
+
+                    const redundancyEl = item.querySelector('.power-redundancy');
+                    const redundancy = redundancyEl ? redundancyEl.textContent.trim().replace(/[()]/g, '') : 'N/A';
+
+                    const tags = item.querySelectorAll('.filter-tag');
+                    let status = 'N/A', circuits = 'N/A', capacity = 'N/A';
+                    tags.forEach(tag => {
+                        const text = tag.textContent.trim();
+                        if (text.startsWith('Circuits:')) {
+                            circuits = text.replace('Circuits:', '').trim();
+                        } else if (text.startsWith('Power:')) {
+                            capacity = text.replace('Power:', '').replace('kVA', '').trim();
+                        } else if (!text.startsWith('Circuits') && !text.startsWith('Power')) {
+                            status = text;
+                        }
+                    });
+
+                    rows.push([room, pos, type, redundancy, status, circuits, capacity]);
+                });
+
+                let markdown = `| ${headers.join(' | ')} |
+    `;
+                markdown += `|${headers.map(() => '---').join('|')}|
+    `;
+                rows.forEach(row => {
+                    markdown += `| ${row.join(' | ')} |
+    `;
+                });
+
+                navigator.clipboard.writeText(markdown).then(() => {
+                    exportDetailBtn.innerHTML = '<span class="export-icon">✓</span> Copied!';
+                    exportDetailBtn.classList.add('copied');
+                    setTimeout(() => {
+                        exportDetailBtn.innerHTML = '<span class="export-icon">📋</span> Copy';
+                        exportDetailBtn.classList.remove('copied');
+                    }, 3000);
+                }).catch(err => {
+                    console.error('Failed to copy:', err);
+                });
+            });
+        }
+    }
 
     function setupModalEvents() {
         const modal = document.querySelector('.position-modal');
@@ -1936,11 +2186,26 @@
                         const metric = cell.dataset.metric;
                         const positions = JSON.parse(cell.dataset.positions);
                         const positionsText = positions
-                            .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
+                            .sort((a, b) => String(a).localeCompare(
+                                String(b), undefined, {numeric: true}))
+                            .map(position => {
+                                const matchingEntry = Object.entries(window.positions)
+                                    .find(([key, pos]) =>
+                                        `${pos.room} ${pos.position}` === position
+                                        && pos.type.toUpperCase() === type
+                                    );
+                                if (matchingEntry) {
+                                    const posInfo = positionMap.get(matchingEntry[0]);
+                                    if (posInfo?.is_brick === true) {
+                                        return `${position} (Euclid)`;
+                                    }
+                                }
+                                return position;
+                            })
                             .join('\n');
 
                         modal.querySelector('.modal-header').innerHTML = `
-                            <div class="modal-title">${type} - ${metric} (${positions.length} positions)</div>
+                            <div class="modal-title">${type} - ${CONFIG.DISPLAY_NAMES[metric]} (${positions.length} positions)</div>
                             <div class="modal-actions">
                                 <button class="copy-positions-button" data-copy-text="${encodeURIComponent(positionsText)}"><span class="export-icon">📋</span> Copy</button>
                                 <div class="modal-close">&times;</div>
@@ -1950,7 +2215,7 @@
                             .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
                             .map(position => {
                                 const matchingPosition = Object.entries(window.positions).find(([key, pos]) =>
-                                    pos.position === position && pos.type.toUpperCase() === type
+                                    `${pos.room} ${pos.position}` === position && pos.type.toUpperCase() === type
                                 );
                                 if (!matchingPosition) return '';
 
@@ -2050,10 +2315,17 @@
         });
     }
 
+    window.analyzeCurrentResults = analyzeCurrentResults;
+    window.closeAnalysis = closeAnalysis;
+    window.collectDetailedAnalysisData = collectDetailedAnalysisData;
+    window.createAnalysisDiv = createAnalysisDiv;
+
+
     // 初始化函数
     async function init() {
         const maxRetries = 3;
         let retryCount = 0;
+        window.clearAllFilters = clearAllFilters;
 
         while (retryCount < maxRetries) {
             try {
@@ -2065,6 +2337,9 @@
 
                 const container = setupInterface();
                 document.getElementById('xwikicontent').appendChild(container);
+
+                setupAIEventListeners();
+                S3ManagerModule.init();
 
                 const loadingIndicator = container.querySelector('.loading-indicator');
                 if (loadingIndicator) {
@@ -2089,6 +2364,822 @@
         }
     }
 
+    // ==================== AI功能 ====================
+    // 解析自然语言查询为筛选条件
+    async function parseNaturalLanguageQuery(userQuery) {
+        const availableOptions = {};
+        document.querySelectorAll('.filter-select').forEach(select => {
+            const column = $(select).data('column');
+            const label = $(select).closest('.filter-section').find('label').text().trim();
+            const options = [];
+            $(select).find('option').each(function() {
+                if (this.value) options.push(this.value);
+            });
+            if (options.length > 0) {
+                availableOptions[label] = { column: column, values: options };
+            }
+        });
+
+        // 构建当前数据摘要（用于复杂查询）
+        const dataSummary = buildDataSummary();
+
+        // 构建可用选项的描述文本
+        let optionsDescription = 'Available filter options and values for the current site:';
+        Object.entries(availableOptions).forEach(([label, info]) => {
+            const displayValues = info.values.length > 30
+                ? info.values.slice(0, 30).join(', ') + ` ... (共${info.values.length}个)`
+                : info.values.join(', ');
+            optionsDescription += `- ${label} (字段名: ${info.column}): [${displayValues}]
+        `;
+        });
+
+
+        const systemPrompt = `You are a data center power topology query assistant. Users will describe their query needs in natural language. You need to determine the query type and return the corresponding result.
+${optionsDescription}
+
+Query type classification:
+1. **simple**: Queries that can be directly implemented through filter conditions (e.g. "show racks in DH01", "show racks in UPS-A1 group")
+2. **complex**: Queries requiring cross-field relationship analysis (e.g. "which racks have all circuits on the same transformer", "find racks with single power feed", "which racks have primary and secondary circuits on the same UPS")
+
+For simple type, return:
+{
+    "queryType": "simple",
+    "filters": {
+        "Position Room": ["DH01"],
+        "status": ["deployed"]
+    },
+    "explanation": "Query all deployed racks in data hall DH01"
+}
+
+For complex type, analyze the data and return:
+{
+    "queryType": "complex",
+    "explanation": "English explanation of the query intent",
+    "analysis": "Detailed analysis conclusion in English, including statistics and key findings, but do not list all rack names",
+    "filterLogic": {
+        "type": "describe the filter logic type",
+        "description": "natural language description of the filter logic",
+        "rule": {
+            "field": "field to check (e.g. transformer, upsGroup, pdu, utility)",
+            "condition": "condition type (e.g. allSame, allDifferent, contains, count_equals, count_less_than)",
+            "value": "optional comparison value",
+            "scope": "check scope (e.g. allCircuits, primaryOnly, secondaryOnly)"
+        }
+    }
+}
+
+filterLogic.rule condition options:
+- allSame: all circuits of the rack have the same value for the specified field
+- allDifferent: all circuits of the rack have different values for the specified field
+- contains: the rack's circuits contain the specified value
+- count_equals: the rack's circuit count equals the specified value
+- count_less_than: the rack's circuit count is less than the specified value
+- primaryAndSecondarySame: primary and secondary circuits have the same value for the specified field
+
+Example:
+Query "which racks have all circuits on the same transformer":
+{
+    "queryType": "complex",
+    "explanation": "Find racks where all circuits are connected to the same transformer",
+    "analysis": "After analysis, the current site has X racks with all circuits connected to the same transformer...",
+    "filterLogic": {
+        "type": "cross_field_analysis",
+        "description": "Check whether all circuits of each rack are connected to the same transformer",
+        "rule": {
+            "field": "transformer",
+            "condition": "allSame",
+            "scope": "allCircuits"
+        }
+    }
+}
+
+Important: Do not include a matchedPositions array in the response. The rack list will be automatically calculated by the frontend code based on the filterLogic.
+CRITICAL FORMATTING RULES:
+1. Your response MUST be ONLY a valid JSON object — nothing else.
+2. Do NOT include any markdown formatting, headers, explanations, or text before or after the JSON.
+3. Do NOT wrap the JSON in code blocks (no \`\`\`json or \`\`\`).
+4. The response must start with { and end with }.
+5. All keys and string values must use double quotes.
+6. Example of correct response format:
+{"queryType":"simple","filters":{"Position Room":["DH01"]},"explanation":"Show all racks in DH01"}
+`;
+
+
+         const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `User query: "${userQuery}"
+
+IMPORTANT: You are a QUERY PARSER, not a question answerer. Do NOT try to answer the query directly.
+Your job is to convert the user query into a filter instruction JSON.
+
+You MUST return ONLY a JSON object in this exact format (no other text):
+{"queryType":"simple","filters":{"COLUMN_NAME":["value1","value2"]},"explanation":"what this query does"}
+or
+{"queryType":"complex","explanation":"...","analysis":"...","filterLogic":{"type":"...","description":"...","rule":{"field":"...","condition":"...","scope":"allCircuits"}}}
+
+Do NOT return query results, rack lists, or any data. Return ONLY the filter instruction JSON.` }
+    ];
+
+
+        // 复杂查询需要更多 tokens
+        const result = await callNovaAPI(messages, 0.2, 3000);
+
+        if (!result.success) {
+            return {
+                error: 'AI 服务暂时不可用',
+                suggestion: '请稍后重试或使用手动筛选'
+            };
+        }
+
+        try {
+            let jsonText = result.content.trim();
+            console.log('[AI Debug] Raw response:', jsonText);
+
+            // 方法1：尝试提取 markdown 代码块中的 JSON
+            const jsonMatch = jsonText.match(/```json\s*([\s\S]*?)\s*```/) ||
+                             jsonText.match(/```\s*([\s\S]*?)\s*```/);
+            if (jsonMatch) {
+                jsonText = jsonMatch.trim();
+            }
+
+            // 方法2：如果没有代码块，尝试找到第一个 { 和最后一个 }
+            if (!jsonMatch) {
+                const firstBrace = jsonText.indexOf('{');
+                const lastBrace = jsonText.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace !== -1) {
+                    jsonText = jsonText.substring(firstBrace, lastBrace + 1);
+                }
+            }
+
+            console.log('[AI Debug] Extracted JSON:', jsonText);
+            const parsed = JSON.parse(jsonText);
+
+            // 校验返回结构的必需字段
+            if (!parsed.queryType) {
+                console.error('[AI Debug] Missing queryType in parsed result:', parsed);
+                return {
+                    error: 'Invalid AI response format',
+                    suggestion: 'The AI did not return a valid query structure. Please try rephrasing your query.'
+                };
+            }
+
+            // 校验 simple 类型必须有 filters
+            if (parsed.queryType === 'simple' && !parsed.filters) {
+                parsed.filters = {};
+            }
+
+            // 校验 complex 类型必须有 filterLogic
+            if (parsed.queryType === 'complex') {
+                if (!parsed.filterLogic || !parsed.filterLogic.rule) {
+                    console.warn('[AI Debug] Complex query missing filterLogic.rule:', parsed);
+                    parsed.filterLogic = parsed.filterLogic || {};
+                    parsed.filterLogic.rule = parsed.filterLogic.rule || { field: '', condition: '', scope: 'allCircuits' };
+                }
+                if (!parsed.analysis) {
+                    parsed.analysis = parsed.explanation || 'No analysis available.';
+                }
+            }
+
+            return parsed;
+        } catch (error) {
+            console.error('[AI Debug] Parsing failed:', error);
+            console.error('[AI Debug] Raw content:', result.content);
+            return {
+                error: 'Parsing failed',
+                suggestion: 'The AI response could not be parsed. Please try a simpler query.'
+            };
+        }
+
+    }
+
+    //执行 AI 查询
+    async function executeAIQuery() {
+        const queryInput = document.getElementById('aiQueryInput');
+        const resultDiv = document.getElementById('aiQueryResult');
+        const queryBtn = document.getElementById('aiQueryBtn');
+
+        const userQuery = queryInput.value.trim();
+        if (!userQuery) {
+            alert('Please input the query content');
+            return;
+        }
+
+        queryBtn.disabled = true;
+        queryBtn.innerHTML = '<span class="ai-icon">⏳</span> Analyzing...';
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<div class="ai-loading">🤖 Nova AI is processing your query...</div>';
+
+        try {
+            const parseResult = await parseNaturalLanguageQuery(userQuery);
+
+            if (parseResult.error) {
+                resultDiv.innerHTML = `
+                    <div class="ai-error">
+                        <strong>❌ ${parseResult.error}</strong>
+                        <p>${parseResult.suggestion}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // 根据查询类型分别处理
+            if (parseResult.queryType === 'complex') {
+                // 本地执行复杂筛选逻辑
+                let matchedPositions = [];
+                try {
+                    if (parseResult.filterLogic && parseResult.filterLogic.rule && parseResult.filterLogic.rule.field) {
+                        matchedPositions = executeComplexFilter(parseResult.filterLogic);
+                    }
+                } catch (filterError) {
+                    console.error('[AI Debug] Complex filter failed:', filterError);
+                    matchedPositions = [];
+                }
+
+                resultDiv.innerHTML = `
+                    <div class="ai-success">
+                        <div class="ai-explanation">
+                            <strong>🎯 Query Understanding</strong>
+                            <p>${parseResult.explanation}</p>
+                        </div>
+                        <div class="ai-analysis-inline">
+                            <strong>📊 Analysis Result:</strong>
+                            <div class="analysis-content">
+                                ${formatAnalysisResult(parseResult.analysis)}
+                            </div>
+                        </div>
+                        <div class="ai-matched-positions">
+                            <strong>📋 Matched Racks(${matchedPositions.length} ):</strong>
+                            <p style="max-height: 200px; overflow-y: auto; font-size: 12px;">
+                                ${matchedPositions.join(', ')}
+                            </p>
+                        </div>
+                        <div class="ai-actions">
+                            <button class="ai-clear-filters" onclick="clearAllFilters()">
+                                <span>🗑️</span> Cancel filter
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // 简单查询：走原有的筛选逻辑
+                document.querySelectorAll('.filter-select').forEach(select => {
+                    $(select).val(null).trigger('change');
+                });
+
+                const filters = parseResult.filters;
+                let appliedFilters = [];
+
+                Object.entries(filters).forEach(([column, values]) => {
+                    const select = $(`.filter-select[data-column="${column}"]`);
+                    if (select.length) {
+                        select.val(values).trigger('change');
+                        appliedFilters.push(`<li><strong>${column}:</strong> ${values.join(', ')}</li>`);
+                    }
+                });
+
+                await new Promise(resolve => setTimeout(resolve, 800));
+                const stats = collectCurrentStats();
+
+                resultDiv.innerHTML = `
+                    <div class="ai-success">
+                        <div class="ai-explanation">
+                            <strong>🎯 Query Understanding：</strong>
+                            <p>${parseResult.explanation}</p>
+                        </div>
+                        <div class="ai-filters-applied">
+                            <strong>📋 Applied Filters：</strong>
+                            <ul>${appliedFilters.join('')}</ul>
+                        </div>
+                        <div class="ai-results-summary">
+                            <strong>📊 Query Result：</strong>
+                            <p>Found <strong>${stats.totalPositions}</strong> matching racks</p>
+                            ${stats.totalPositions > 0 ? 'See the Summary Table and Detail Info sections below for details' : 'Try adjusting your filter criteria'}
+                        </div>
+                        <div class="ai-actions">
+                            <button class="ai-clear-filters" onclick="clearAllFilters()">
+                                <span>🗑️</span> Cancel filter
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+        } catch (error) {
+            console.error('Query Failed:', error);
+            resultDiv.innerHTML = `
+                <div class="ai-error">
+                    <strong>❌ Query Failed</strong>
+                    <p>${error.message}</p>
+                </div>
+            `;
+        } finally {
+            queryBtn.disabled = false;
+            queryBtn.innerHTML = '<span class="ai-icon">🔍</span> Query';
+        }
+    }
+
+    // 收集当前统计数据
+    function collectCurrentStats() {
+        const totalPositions = Object.keys(window.filteredPositions || {}).length;
+        const rackTypes = {};
+        const powerStatus = {
+            'At Risk - Primary Loss': 0,
+            'At Risk - Secondary Loss': 0,
+            'At Risk - Partial Loss': 0,
+            'At Risk - Complete Loss': 0
+        };
+
+        Object.values(window.filteredPositions || {}).forEach(pos => {
+            const type = pos.type || 'Unknown';
+            rackTypes[type] = (rackTypes[type] || 0) + 1;
+        });
+
+        return {
+            totalPositions,
+            rackTypes,
+            powerStatus
+        };
+    }
+
+    function buildDataSummary() {
+        // 按机柜聚合电路信息，用于统计
+        const positionData = {};
+        EXCEL_DATA.forEach(row => {
+            const key = `${row['Position Room']}-${row['Position']}`;
+            if (!positionData[key]) {
+                positionData[key] = { circuits: [] };
+                const posInfo = positionMap.get(key);
+                if (posInfo) {
+                    positionData[key].type = posInfo.type || 'unknown';
+                    positionData[key].status = posInfo.status || 'unknown';
+                    positionData[key].power_redundancy = posInfo.power_redundancy || 'unknown';
+                }
+            }
+            positionData[key].circuits.push({
+                powerFeed: row['Power Feed'],
+                pdu: row['PDU Name'],
+                upsGroup: row['UPS Group'],
+                usb: row['USB'],
+                transformer: row.routingInfo?.transformer || 'N/A',
+                utility: row.routingInfo?.utility || 'N/A'
+            });
+        });
+
+        const allPositions = Object.entries(positionData);
+
+        // 唯一值统计
+        const uniqueTransformers = [...new Set(EXCEL_DATA.map(r => r.routingInfo?.transformer).filter(Boolean))];
+        const uniqueUPS = [...new Set(EXCEL_DATA.map(r => r['UPS Group']).filter(Boolean))];
+        const uniquePDUs = [...new Set(EXCEL_DATA.map(r => r['PDU Name']).filter(Boolean))];
+        const uniqueUSBs = [...new Set(EXCEL_DATA.map(r => r['USB']).filter(Boolean))];
+        const uniqueUtilities = [...new Set(EXCEL_DATA.map(r => r.routingInfo?.utility).filter(Boolean))];
+
+        // 电路数量分布
+        const circuitCounts = {};
+        allPositions.forEach(([key, pos]) => {
+            const count = pos.circuits.length;
+            circuitCounts[count] = (circuitCounts[count] || 0) + 1;
+        });
+
+        // 冗余类型分布
+        const redundancyDist = {};
+        allPositions.forEach(([key, pos]) => {
+            const r = pos.power_redundancy || 'unknown';
+            redundancyDist[r] = (redundancyDist[r] || 0) + 1;
+        });
+
+        // 机柜类型分布
+        const typeDist = {};
+        allPositions.forEach(([key, pos]) => {
+            const t = pos.type || 'unknown';
+            typeDist[t] = (typeDist[t] || 0) + 1;
+        });
+
+        let summary = `Current site data overview:
+    - Total racks: ${allPositions.length}
+    - Total circuits: ${EXCEL_DATA.length}
+
+    Data structure per rack:
+    - Each rack has multiple power circuits, each containing the following fields:
+      - powerFeed: Power type (Primary or Secondary)
+      - pdu: PDU name
+      - upsGroup: UPS group name
+      - usb: USB (Uninterruptible Switch Board) name
+      - transformer: Transformer name
+      - utility: Utility source
+    - Rack metadata: type, status, power_redundancy
+
+    Circuit count distribution:
+    `;
+        Object.entries(circuitCounts).sort((a, b) => a - b).forEach(([count, num]) => {
+            summary += `- ${count} circuits: ${num} racks
+    `;
+        });
+
+        summary += `
+    Redundancy configuration distribution:
+    `;
+        Object.entries(redundancyDist).forEach(([type, count]) => {
+            summary += `- ${type}: ${count} racks
+    `;
+        });
+
+        summary += `
+    Rack type distribution:
+    `;
+        Object.entries(typeDist).forEach(([type, count]) => {
+            summary += `- ${type}: ${count} racks
+    `;
+        });
+
+        summary += `
+    Unique equipment values:
+    - Transformers (${uniqueTransformers.length}): ${uniqueTransformers.join(', ')}
+    - UPS Groups (${uniqueUPS.length}): ${uniqueUPS.join(', ')}
+    - USBs (${uniqueUSBs.length}): ${uniqueUSBs.join(', ')}
+    - PDUs (${uniquePDUs.length}): ${uniquePDUs.length <= 20 ? uniquePDUs.join(', ') : uniquePDUs.slice(0, 20).join(', ') + '...'}
+    - Utilities (${uniqueUtilities.length}): ${uniqueUtilities.join(', ')}
+    `;
+
+        summary += `
+    Note: You do not need to return a matched rack list (matchedPositions). The frontend code will automatically filter based on the filterLogic rules you return.
+    You only need to:
+    1. Understand the user's query intent
+    2. Provide analysis conclusions based on the data overview above (analysis field)
+    3. Return the correct filterLogic rules for the frontend to filter data
+
+    Available filterLogic.rule.field values: pdu, upsGroup, usb, transformer, utility, powerFeed
+    Available filterLogic.rule.condition values: allSame, allDifferent, contains, count_equals, count_less_than, primaryAndSecondarySame
+    Available filterLogic.rule.scope values: allCircuits, primaryOnly, secondaryOnly
+    `;
+
+        return summary;
+    }
+
+    function executeComplexFilter(filterLogic) {
+        const positionData = {};
+
+        // 按机柜聚合电路信息
+        EXCEL_DATA.forEach(row => {
+            const key = `${row['Position Room']}-${row['Position']}`;
+            if (!positionData[key]) {
+                positionData[key] = { circuits: [] };
+            }
+            positionData[key].circuits.push({
+                pdu: row['PDU Name'],
+                upsGroup: row['UPS Group'],
+                usb: row['USB'],
+                powerFeed: row['Power Feed'],
+                transformer: row.routingInfo?.transformer || 'N/A',
+                utility: row.routingInfo?.utility || 'N/A'
+            });
+        });
+
+        const rule = filterLogic.rule;
+        const matchedPositions = [];
+
+        Object.entries(positionData).forEach(([key, pos]) => {
+            let circuits = pos.circuits;
+
+            // 根据 scope 筛选电路范围
+            if (rule.scope === 'primaryOnly') {
+                circuits = circuits.filter(c => c.powerFeed === 'Primary');
+            } else if (rule.scope === 'secondaryOnly') {
+                circuits = circuits.filter(c => c.powerFeed === 'Secondary');
+            }
+
+            if (circuits.length === 0) return;
+
+            let matched = false;
+
+            switch (rule.condition) {
+                case 'allSame': {
+                    const values = circuits.map(c => c[rule.field]).filter(v => v && v !== 'N/A');
+                    matched = values.length > 1 && new Set(values).size === 1;
+                    break;
+                }
+                case 'allDifferent': {
+                    const values = circuits.map(c => c[rule.field]).filter(v => v && v !== 'N/A');
+                    matched = values.length > 1 && new Set(values).size === values.length;
+                    break;
+                }
+                case 'primaryAndSecondarySame': {
+                    const primary = circuits.filter(c => c.powerFeed === 'Primary').map(c => c[rule.field]);
+                    const secondary = circuits.filter(c => c.powerFeed === 'Secondary').map(c => c[rule.field]);
+                    if (primary.length > 0 && secondary.length > 0) {
+                        const primarySet = new Set(primary);
+                        const secondarySet = new Set(secondary);
+                        // 检查主备电路是否有交集
+                        matched = [...primarySet].some(v => secondarySet.has(v));
+                    }
+                    break;
+                }
+                case 'contains': {
+                    matched = circuits.some(c => c[rule.field] === rule.value);
+                    break;
+                }
+                case 'count_equals': {
+                    matched = circuits.length === parseInt(rule.value);
+                    break;
+                }
+                case 'count_less_than': {
+                    matched = circuits.length < parseInt(rule.value);
+                    break;
+                }
+                default:
+                    console.warn('未知的筛选条件:', rule.condition);
+            }
+
+            if (matched) {
+                matchedPositions.push(key);
+            }
+        });
+
+        return matchedPositions;
+    }
+
+
+    /**
+     * 分析当前筛选结果
+     */
+    async function analyzeCurrentResults() {
+        const analysisDiv = document.getElementById('aiAnalysisResult') || createAnalysisDiv();
+        const analyzeBtn = document.querySelector('.ai-analyze-btn');
+
+        if (analyzeBtn) {
+            analyzeBtn.disabled = true;
+            analyzeBtn.innerHTML = '<span>⏳</span>  Analyzing...';
+        }
+
+        analysisDiv.style.display = 'block';
+        analysisDiv.innerHTML = '<div class="ai-loading">🤖 Nova AI is analyzing filtered results...</div>';
+
+        try {
+            // 1. 收集当前数据
+            const currentData = collectDetailedAnalysisData();
+
+            // 2. 构建分析 prompt
+           const systemPrompt = `You are a data center power impact analysis expert. You need to analyze the power impact situation of racks, determine whether it is "potential impact" or "direct impact", and provide recommendations for next steps.
+
+Key concepts:
+- **Direct Impact**: A failure of the currently filtered power component would immediately cause rack power loss
+- **Potential Impact**: Due to site redundancy and automatic failover mechanisms, racks may not lose power immediately, but risk exists
+
+Power redundancy types:
+- **2N**: Dual power feed, fully redundant
+- **N+C**: N+1 redundancy configuration
+- **N**: Single power feed, no redundancy
+
+Risk levels:
+- **At Risk - Complete Loss**: All circuits affected, highest risk
+- **At Risk - Primary Loss**: Primary circuits affected
+- **At Risk - Secondary Loss**: Secondary circuits affected
+- **At Risk - Partial Loss**: Some circuits affected
+
+Please provide in English:
+1. Impact nature assessment (potential impact vs. direct impact)
+2. Risk level evaluation
+3. Critical equipment identification
+4. Recommended next steps`;
+
+
+            const userPrompt = `Current filter conditions:
+${JSON.stringify(currentData.filters, null, 2)}
+
+Impact statistics:
+- Total racks: ${currentData.totalRacks}
+- At Risk - Complete Loss: ${currentData.riskStats['At Risk - Complete Loss'] || 0}
+- At Risk - Primary Loss: ${currentData.riskStats['At Risk - Primary Loss'] || 0}
+- At Risk - Secondary Loss: ${currentData.riskStats['At Risk - Secondary Loss'] || 0}
+- At Risk - Partial Loss: ${currentData.riskStats['At Risk - Partial Loss'] || 0}
+
+Rack type distribution:
+${JSON.stringify(currentData.rackTypes, null, 2)}
+
+Power redundancy configuration:
+${JSON.stringify(currentData.redundancyTypes, null, 2)}
+
+Please analyze whether these racks are currently under potential impact or direct impact, and explain what equipment needs attention next.`;
+
+
+            const messages = [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ];
+
+            // 3. 调用 Nova API
+            const result = await callNovaAPI(messages, 0.5);
+
+            if (!result.success) {
+                throw new Error(result.error);
+            }
+
+            // 4. 显示分析结果
+            analysisDiv.innerHTML = `
+                <div class="ai-analysis-result">
+                    <div class="analysis-header">
+                        <h3>🔍 AI Impact Analysis Report</h3>
+                        <button class="close-analysis" onclick="closeAnalysis()">✕</button>
+                    </div>
+                    <div class="analysis-content">
+                        ${formatAnalysisResult(result.content)}
+                    </div>
+                    <div class="analysis-footer">
+                        <small> Generated by Amazon Nova AI | Token usage: ${result.usage.total_tokens}</small>
+                    </div>
+                </div>
+            `;
+
+        } catch (error) {
+            console.error('Analysis Failed:', error);
+            analysisDiv.innerHTML = `
+                <div class="ai-error">
+                    <strong>❌Analysis Failed</strong>
+                    <p>${error.message}</p>
+                </div>
+            `;
+        } finally {
+            if (analyzeBtn) {
+                analyzeBtn.disabled = false;
+                analyzeBtn.innerHTML = '<span>🔍</span>AI Analyze';
+            }
+        }
+    }
+
+    // 收集详细分析数据
+    function collectDetailedAnalysisData() {
+        const currentFilters = {};
+        document.querySelectorAll('.filter-select').forEach(select => {
+            const column = $(select).data('column');
+            const values = $(select).val() || [];
+            if (values.length > 0) {
+                const label = $(select).closest('.filter-section').find('label').text().trim();
+                currentFilters[label] = values;
+            }
+        });
+
+        const rackTypes = {};
+        const redundancyTypes = {};
+        const riskStats = {
+            'At Risk - Complete Loss': 0,
+            'At Risk - Primary Loss': 0,
+            'At Risk - Secondary Loss': 0,
+            'At Risk - Partial Loss': 0
+        };
+
+        // 获取当前筛选后的数据
+        let positionsToAnalyze = window.filteredPositions || {};
+
+        // 如果 filteredPositions 为空但有活跃筛选条件，从 positionMap 重新构建
+        if (Object.keys(positionsToAnalyze).length === 0 && Object.keys(currentFilters).length > 0) {
+            const activeFilters = {};
+            document.querySelectorAll('.filter-select').forEach(select => {
+                const column = $(select).data('column');
+                const values = $(select).val() || [];
+                if (values.length > 0) {
+                    activeFilters[column] = values.map(v => String(v).trim());
+                }
+            });
+
+            const filterLogic = window.filterLogic || 'and';
+            const activeFilterEntries = Object.entries(activeFilters).filter(([col, vals]) => vals && vals.length > 0);
+
+            if (activeFilterEntries.length > 0) {
+                const filteredData = EXCEL_DATA.filter(item => {
+                    const checkMatch = (column, values) => {
+                        if (!values || values.length === 0) return true;
+                        if (column === 'type' || column === 'status') {
+                            const positionKey = `${item['Position Room']}-${item['Position']}`;
+                            const posInfo = positionMap.get(positionKey);
+                            const value = column === 'type' ? posInfo?.type : posInfo?.status;
+                            return values.includes(value);
+                        } else if (column === 'power_kva') {
+                            const positionKey = `${item['Position Room']}-${item['Position']}`;
+                            const posInfo = positionMap.get(positionKey);
+                            return values.some(v => parseFloat(v) === posInfo?.power_kva);
+                        } else if (column.startsWith('routingInfo.')) {
+                            const routingValue = item.routingInfo?.[column.split('.')[1]];
+                            return values.some(v => String(routingValue || '').trim() === String(v).trim());
+                        } else {
+                            const itemValue = String(item[column] || '').trim();
+                            return values.some(v => String(v).trim() === itemValue);
+                        }
+                    };
+
+                    if (filterLogic === 'and') {
+                        return activeFilterEntries.every(([column, values]) => checkMatch(column, values));
+                    } else {
+                        return activeFilterEntries.some(([column, values]) => checkMatch(column, values));
+                    }
+                });
+
+                // 从筛选后的数据构建 positionsToAnalyze
+                filteredData.forEach(item => {
+                    const key = `${item['Position Room']}-${item['Position']}`;
+                    if (!positionsToAnalyze[key]) {
+                        positionsToAnalyze[key] = item;
+                    }
+                });
+            }
+        }
+
+        // 遍历分析数据
+        Object.entries(positionsToAnalyze).forEach(([key, pos]) => {
+            const posInfo = positionMap.get(key);
+            if (!posInfo) return;
+
+            // 统计机柜类型
+            const type = posInfo.type || 'Unknown';
+            rackTypes[type] = (rackTypes[type] || 0) + 1;
+
+            // 统计冗余类型
+            const redundancy = posInfo.power_redundancy || 'Unknown';
+            redundancyTypes[redundancy] = (redundancyTypes[redundancy] || 0) + 1;
+        });
+
+        // 统计风险等级 - 从当前页面的统计数据中获取
+        const summaryTable = document.querySelector('.summary-title');
+        if (summaryTable) {
+            // 尝试从页面上的统计表格中读取风险数据
+            document.querySelectorAll('.stats-table td, .stats-cell').forEach(cell => {
+                const text = cell.textContent || '';
+                Object.keys(riskStats).forEach(riskLevel => {
+                    if (text.includes(riskLevel)) {
+                        const countCell = cell.nextElementSibling;
+                        if (countCell) {
+                            const count = parseInt(countCell.textContent) || 0;
+                            riskStats[riskLevel] = count;
+                        }
+                    }
+                });
+            });
+        }
+
+        return {
+            filters: currentFilters,
+            totalRacks: Object.keys(positionsToAnalyze).length,
+            rackTypes,
+            redundancyTypes,
+            riskStats
+        };
+    }
+
+
+
+
+    /**
+     * 格式化分析结果
+     */
+    function formatAnalysisResult(content) {
+        // 将 markdown 格式转换为 HTML
+        return content
+            .trim()
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\n\n/g, '</p><p>')
+            .replace(/\n/g, '<br>')
+            .replace(/^(.+)$/s, '<p>$1</p>');
+    }
+
+    /**
+     * 创建分析结果显示区域
+     */
+    function createAnalysisDiv() {
+        const div = document.createElement('div');
+        div.id = 'aiAnalysisResult';
+        div.className = 'ai-analysis-container';
+        document.querySelector('.ai-query-section').appendChild(div);
+        return div;
+    }
+
+    function clearAllFilters() {
+        document.querySelectorAll('.filter-select').forEach(select => {
+            $(select).val(null).trigger('change');
+        });
+
+        const aiQueryResult = document.getElementById('aiQueryResult');
+        if (aiQueryResult) {
+            aiQueryResult.style.display = 'none';
+        }
+
+        const aiAnalysisResult = document.getElementById('aiAnalysisResult');
+        if (aiAnalysisResult) {
+            aiAnalysisResult.style.display = 'none';
+        }
+
+        const aiQueryInput = document.getElementById('aiQueryInput');
+        if (aiQueryInput) {
+            aiQueryInput.value = '';
+        }
+    }
+
+    function closeAnalysis() {
+        const analysisDiv = document.getElementById('aiAnalysisResult');
+        if (analysisDiv) {
+            analysisDiv.style.display = 'none';
+        }
+    }
+
+
     // ==================== 样式定义 ====================
     GM_addStyle(`
         /* 站点选择区域 */
@@ -2106,42 +3197,6 @@
         .topo-container { width: 100%; background: white; padding: 20px; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 20px 0; display: flex; flex-direction: column; }
         .loading-indicator { margin-top: 15px; color: #1976d2; font-weight: bold; padding: 15px; text-align: center; background: #f8f9fa; border-radius: 4px; }
         .error-message { color: #f44336; padding: 10px; margin: 10px 0; background: #fee; border-radius: 4px; border: 1px solid #fdd; }
-
-        /* S3 Manager 样式 */
-        .s3-manager-container { margin: 20px 0; background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .s3-manager-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background: linear-gradient(135deg, #232f3e 0%, #37475a 100%); color: white; cursor: pointer; user-select: none; }
-        .s3-manager-title { display: flex; align-items: center; font-weight: 600; font-size: 16px; }
-        .s3-icon { font-size: 20px; margin-right: 10px; }
-        .s3-manager-toggle { font-size: 14px; transition: transform 0.3s ease; }
-        .s3-manager-container.collapsed .s3-manager-toggle { transform: rotate(-90deg); }
-        .s3-manager-content { padding: 20px; max-height: 600px; overflow: hidden; transition: max-height 0.3s ease, padding 0.3s ease; }
-        .s3-manager-container.collapsed .s3-manager-content { max-height: 0; padding: 0 20px; }
-        .s3-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px; }
-        .s3-upload-section { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .s3-file-input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; max-width: 250px; }
-        .s3-button { display: flex; align-items: center; gap: 6px; padding: 10px 16px; background: #ff9900; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background 0.2s; }
-        .s3-button:hover { background: #ec7211; }
-        .s3-refresh-btn { background: #232f3e; }
-        .s3-refresh-btn:hover { background: #37475a; }
-        .s3-status { padding: 12px 15px; border-radius: 4px; font-size: 13px; margin-bottom: 15px; }
-        .s3-status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .s3-status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .s3-status.info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
-        .s3-file-list { max-height: 400px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; background: #fafafa; }
-        .s3-file-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        .s3-file-table th { background: #f5f5f5; padding: 12px 15px; text-align: left; font-weight: 600; border-bottom: 2px solid #e0e0e0; position: sticky; top: 0; z-index: 1; }
-        .s3-file-table td { padding: 12px 15px; border-bottom: 1px solid #f0f0f0; background: white; }
-        .s3-file-row:hover td { background: #f9f9f9; }
-        .s3-file-name { font-weight: 500; word-break: break-all; max-width: 300px; }
-        .s3-file-size, .s3-file-date { color: #666; white-space: nowrap; }
-        .s3-file-actions { display: flex; gap: 8px; }
-        .s3-action-btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: all 0.2s; }
-        .s3-download-btn { background: #e3f2fd; }
-        .s3-download-btn:hover { background: #bbdefb; transform: scale(1.05); }
-        .s3-delete-btn { background: #ffebee; }
-        .s3-delete-btn:hover { background: #ffcdd2; transform: scale(1.05); }
-        .s3-empty-state { padding: 40px 20px; text-align: center; color: #687078; font-size: 14px; }
-        .s3-loading { padding: 30px; text-align: center; color: #666; }
 
         /* 筛选器容器 */
         .filters-container { display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 15px; padding: 15px; background: #f5f5f5; border-radius: 6px; margin-bottom: 15px; overflow-x: auto !important; overflow-y: hidden !important; align-items: flex-start; }
@@ -2179,8 +3234,7 @@
         .stats-details { flex: 1; overflow-x: auto; }
         .stats-table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); table-layout: fixed; }
         .stats-table th, .stats-table td { padding: 12px; text-align: center; border: 1px solid #e0e0e0; }
-        .stats-table td { word-break: break-word; white-space: normal; max-width: 150px;}
-        .stats-table th { background: #f5f5f5; font-weight: bold; color: #333; font-size: 14px; word-break: break-word; }
+        .stats-table th { background: #f5f5f5; font-weight: bold; color: #333; font-size: 14px; white-space: nowrap; }
         .stats-table th:first-child, .stats-table td:first-child { width: 180px; text-align: left; font-weight: bold; background: #f5f5f5; }
         .stats-table th:last-child, .stats-table td:last-child { background-color: #f5f5f5; font-weight: bold; border-left: 2px solid #e0e0e0; }
         .stats-cell { font-family: 'Arial', sans-serif; font-weight: bold; color: #000000; font-size: 14px; text-align: center; }
@@ -2204,8 +3258,7 @@
         .count-value { font-size: 1em; font-weight: bold; color: #333; padding: 2px 10px; }
 
         /* 区域标题 */
-        .section-title { font-size: 20px; font-weight: 600; color: #333; margin: 25px 0 15px 0; padding-bottom: 10px;}
-        .section-title:before { content: none; }
+        .section-title { font-size: 20px; font-weight: 600; color: #333; margin: 25px 0 15px 0; padding-bottom: 10px; border-bottom: 3px solid #667eea; position: relative; }
         .summary-title { margin-top: 10px; }
         .detail-title { margin-top: 30px; }
 
@@ -2296,8 +3349,6 @@
         /* 响应式 */
         @media (max-width: 768px) {
             .position-list { grid-template-columns: 1fr; }
-            .s3-toolbar { flex-direction: column; align-items: stretch; }
-            .s3-upload-section { flex-direction: column; }
             .stats-tables-wrapper { flex-direction: column; }
             .side-stats { flex-direction: row; width: 100%; }
             .downstream-stats, .patch-stats { flex: 1; width: auto; }
@@ -2355,6 +3406,304 @@
             background: #1976d2;
             color: white;
         }
+
+        /* AI 查询区域 */
+        .ai-query-section {
+            margin: 15px 0;
+            background: #f8f9fa;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .ai-query-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .ai-query-title {
+            display: flex;
+            align-items: center;
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .ai-query-title .ai-icon {
+            font-size: 20px;
+            margin-right: 10px;
+        }
+
+        .ai-toggle {
+            font-size: 14px;
+            transition: transform 0.3s ease;
+        }
+
+        .ai-query-section.collapsed .ai-toggle {
+            transform: rotate(-90deg);
+        }
+
+        .ai-query-content {
+            padding: 15px 20px;
+            background: white;
+            max-height: 500px;
+            overflow-y: auto;
+            transition: max-height 0.3s ease, padding 0.3s ease;
+        }
+
+        .ai-query-section.collapsed .ai-query-content {
+            max-height: 0;
+            padding: 0 20px;
+        }
+
+        /* AI 查询容器内部样式保持不变 */
+        .ai-query-container {
+            /* 原有样式 */
+        }
+
+
+        .ai-query-container {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+        }
+
+        .ai-input-wrapper {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .ai-query-input {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        .ai-query-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .ai-query-button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .ai-query-button:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .ai-query-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .ai-loading {
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .ai-success {
+            background: #e8f5e9;
+            border: 1px solid #4caf50;
+            padding: 15px;
+            border-radius: 6px;
+        }
+
+        .ai-error {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            padding: 15px;
+            border-radius: 6px;
+            color: #c62828;
+        }
+
+        .ai-actions {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .ai-clear-filters {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .ai-buttons-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: fit-content;
+        }
+
+        .ai-analyze-btn {
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+            transition: opacity 0.2s;
+        }
+
+        .ai-analyze-btn:hover {
+            opacity: 0.9;
+        }
+
+        .ai-analyze-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .ai-clear-filters {
+            background: #ff9800;
+            color: white;
+        }
+
+        .ai-clear-filters:hover {
+            background: #f57c00;
+        }
+
+        .ai-analysis-container {
+            margin-top: 15px;
+        }
+
+        .ai-analysis-result {
+            background: #fff3e0;
+            border: 2px solid #ff9800;
+            border-radius: 6px;
+            overflow-y: auto;
+            max-height: 600px;
+        }
+
+        .analysis-header {
+            background: #ff9800;
+            color: white;
+            padding: 12px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .analysis-header h3 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .close-analysis {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+        }
+
+        .analysis-content {
+            padding: 15px;
+            line-height: 1.6;
+        }
+
+        .analysis-footer {
+            padding: 10px 15px;
+            background: #ffe0b2;
+            border-top: 1px solid #ffb74d;
+            text-align: right;
+        }
+
+        .ai-query-examples {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .examples-label {
+            font-size: 12px;
+            color: #666;
+            font-weight: 600;
+        }
+
+        .example-query {
+            padding: 4px 10px;
+            background: #f5f5f5;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .example-query:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        /* ==================== S3 Manager 模块样式 ==================== */
+        .s3-manager-container { margin: 15px 0; background: #f8f9fa; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+        .s3-manager-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: linear-gradient(135deg, #2196F3 0%, #21CBF3 100%); color: white; cursor: pointer; user-select: none; }
+        .s3-manager-title { display: flex; align-items: center; font-weight: 600; font-size: 15px; }
+        .s3-manager-icon { font-size: 20px; margin-right: 10px; }
+        .s3-manager-toggle { font-size: 14px; transition: transform 0.3s ease; }
+        .s3-manager-container.collapsed .s3-manager-toggle { transform: rotate(-90deg); }
+        .s3-manager-content { padding: 15px 20px; background: white; max-height: 600px; overflow: hidden; transition: max-height 0.3s ease, padding 0.3s ease; }
+        .s3-manager-container.collapsed .s3-manager-content { max-height: 0; padding: 0 20px; }
+
+        .s3-status { padding: 8px 12px; border-radius: 4px; margin-bottom: 10px; font-size: 13px; }
+        .s3-status.success { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+        .s3-status.error { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+        .s3-status.info { background: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
+
+        .s3-upload-section { display: flex; gap: 10px; align-items: center; margin-bottom: 15px; flex-wrap: wrap; }
+        .s3-file-input { flex: 1; min-width: 200px; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+        .s3-btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; transition: background 0.2s; }
+        .s3-btn-upload { background: #4CAF50; color: white; }
+        .s3-btn-upload:hover { background: #388E3C; }
+        .s3-btn-refresh { background: #2196F3; color: white; }
+        .s3-btn-refresh:hover { background: #1976D2; }
+
+        .s3-file-list { max-height: 400px; overflow-y: auto; }
+        .s3-file-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .s3-file-table th { background: #f5f5f5; padding: 10px 12px; text-align: left; border-bottom: 2px solid #e0e0e0; font-weight: 600; color: #333; }
+        .s3-file-table td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+        .s3-file-row:hover { background: #f8f9fa; }
+        .s3-file-name { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .s3-file-size { color: #666; white-space: nowrap; }
+        .s3-file-date { color: #666; white-space: nowrap; font-size: 12px; }
+        .s3-file-actions { white-space: nowrap; }
+        .s3-action-btn { background: none; border: 1px solid #ddd; border-radius: 4px; padding: 4px 8px; cursor: pointer; margin: 0 2px; transition: background 0.2s; }
+        .s3-action-btn:hover { background: #f0f0f0; }
+        .s3-empty-state { text-align: center; padding: 30px; color: #999; font-size: 14px; }
+        .s3-loading { text-align: center; padding: 20px; color: #1976d2; }
     `);
 
     // 页面加载初始化
