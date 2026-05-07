@@ -69,7 +69,7 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.61',
+        VERSION: '1.62',
         CLUSTER:'sin',
 
         // API 端点配置
