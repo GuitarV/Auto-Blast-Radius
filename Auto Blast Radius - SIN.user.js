@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius - SIN
 // @namespace    http://tampermonkey.net/
-// @version      1.61
+// @version      1.62
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/SIN_colo_dceo/AutoBlastRadius*
@@ -640,7 +640,7 @@
                             'Content-Type': 'application/json'
                         },
                         data: JSON.stringify({
-                            filename: file.name,
+                            key: file.name,
                             content: base64Content,
                             content_type: file.type || 'application/octet-stream'
                         }),
