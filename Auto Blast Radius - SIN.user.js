@@ -27,9 +27,8 @@
 // @connect      nova.amazon.com
 // @connect      ncfs-api.corp.amazon.com
 // @connect      ibfkianxb0.execute-api.us-west-2.amazonaws.com
-// @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
-// @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius.user.js
-
+// @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius%20-%20SIN.user.js
+// @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius%20-%20SIN.user.js
 // ==/UserScript==
 (function() {
     'use strict';
