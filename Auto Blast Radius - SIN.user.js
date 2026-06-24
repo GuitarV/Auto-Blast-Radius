@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius - SIN
 // @namespace    http://tampermonkey.net/
-// @version      1.62
+// @version      1.65
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/SIN_colo_dceo/AutoBlastRadius*
@@ -26,6 +26,7 @@
 // @connect      s3.amazonaws.com
 // @connect      nova.amazon.com
 // @connect      ncfs-api.corp.amazon.com
+// @connect      mcm.dceo.aws.dev
 // @connect      ibfkianxb0.execute-api.us-west-2.amazonaws.com
 // @updateURL    https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius%20-%20SIN.user.js
 // @downloadURL  https://github.com/GuitarV/Auto-Blast-Radius/raw/refs/heads/main/Auto%20Blast%20Radius%20-%20SIN.user.js
@@ -68,17 +69,12 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.62',
+        VERSION: '1.65',
         CLUSTER:'sin',
 
         // API 端点配置
         API_ENDPOINTS: {
-            LAMBDA_URL: 'https://twuukpz75g.execute-api.us-west-2.amazonaws.com/default/GetS3Data',
-        },
-
-        // 认证配置
-        AUTH: {
-            BEARER_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiYmpzZGNlbyIsInR5cGUiOiJwZXJtYW5lbnQifQ.mKaIWhj_d7kxB8fwh2BDDGKMyVLrkiwZZzuZzc8ra6s'
+            LAMBDA_URL: 'https://mcm.dceo.aws.dev/s3data',
         },
 
         // Nova AI 配置
@@ -148,8 +144,7 @@
 
         // S3 文件管理器配置
         S3_API: {
-                BASE_URL: 'https://ibfkianxb0.execute-api.us-west-2.amazonaws.com/Test',
-                AUTH_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiYmpzZGNlbyIsInR5cGUiOiJwZXJtYW5lbnQifQ.mKaIWhj_d7kxB8fwh2BDDGKMyVLrkiwZZzuZzc8ra6s',
+                BASE_URL: 'https://mcm.dceo.aws.dev/s3manager',
                 ENDPOINTS: {
                     LIST: '/files',
                     UPLOAD: '/upload',
@@ -484,7 +479,6 @@
                 method: 'GET',
                 url: `${CONFIG.S3_API.BASE_URL}${CONFIG.S3_API.ENDPOINTS.LIST}`,
                 headers: {
-                    'Authorization': CONFIG.S3_API.AUTH_TOKEN,
                     'Content-Type': 'application/json'
                 },
                 onload: (response) => {
@@ -561,7 +555,6 @@
                 method: 'GET',
                 url: `${CONFIG.S3_API.BASE_URL}${CONFIG.S3_API.ENDPOINTS.DOWNLOAD}/${encodeURIComponent(key)}`,
                 headers: {
-                    'Authorization': CONFIG.S3_API.AUTH_TOKEN,
                     'Content-Type': 'application/json'
                 },
                 onload: (response) => {
@@ -592,7 +585,6 @@
                 method: 'DELETE',
                 url: `${CONFIG.S3_API.BASE_URL}${CONFIG.S3_API.ENDPOINTS.DELETE}/${encodeURIComponent(key)}`,
                 headers: {
-                    'Authorization': CONFIG.S3_API.AUTH_TOKEN,
                     'Content-Type': 'application/json'
                 },
                 onload: (response) => {
@@ -635,7 +627,6 @@
                         method: 'POST',
                         url: `${CONFIG.S3_API.BASE_URL}${CONFIG.S3_API.ENDPOINTS.UPLOAD}`,
                         headers: {
-                            'Authorization': CONFIG.S3_API.AUTH_TOKEN,
                             'Content-Type': 'application/json'
                         },
                         data: JSON.stringify({
@@ -869,7 +860,6 @@
                 headers: {
                     "Content-Type": "application/json",
                     "Accept": "application/json",
-                    "Authorization": CONFIG.AUTH.BEARER_TOKEN,
                 },
                 data: JSON.stringify({ site: site, cluster: CONFIG.CLUSTER}),
                 onload: function(response) {
