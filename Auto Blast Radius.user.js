@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.61
+// @version      1.65
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -18,6 +18,7 @@
 // @connect      cdn.jsdelivr.net
 // @connect      code.jquery.com
 // @connect      ajax.googleapis.com
+// @connect      mcm.dceo.aws.dev
 // @connect      sentry.amazon.com
 // @connect      sso.amazon.com
 // @connect      idp.amazon.com
@@ -68,17 +69,12 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.61',
+        VERSION: '1.65',
         CLUSTER:'bjs',
 
         // API 端点配置
         API_ENDPOINTS: {
-            LAMBDA_URL: 'https://twuukpz75g.execute-api.us-west-2.amazonaws.com/default/GetS3Data',
-        },
-
-        // 认证配置
-        AUTH: {
-            BEARER_TOKEN: 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiYmpzZGNlbyIsInR5cGUiOiJwZXJtYW5lbnQifQ.mKaIWhj_d7kxB8fwh2BDDGKMyVLrkiwZZzuZzc8ra6s'
+            LAMBDA_URL: 'https://mcm.dceo.aws.dev/s3data',
         },
 
         // Nova AI 配置
@@ -574,7 +570,6 @@
                 headers: {
                     "Content-Type": "application/json",
                     "Accept": "application/json",
-                    "Authorization": CONFIG.AUTH.BEARER_TOKEN,
                 },
                 data: JSON.stringify({ site: site, cluster: CONFIG.CLUSTER}),
                 onload: function(response) {
@@ -1691,15 +1686,15 @@
                 // 获取当前显示的统计表格数据
                 const statsTable = document.querySelector('.stats-details .stats-table');
                 if (!statsTable) return;
-    
+
                 // 提取表头
                 const headers = Array.from(statsTable.querySelectorAll('thead th')).map(th => th.textContent.trim());
-    
+
                 // 提取数据行
                 const rows = Array.from(statsTable.querySelectorAll('tbody tr')).map(tr => {
                     return Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim());
                 });
-    
+
                 // 生成 Markdown 表格
                 let markdown = `| ${headers.join(' | ')} |
     `;
@@ -1709,7 +1704,7 @@
                     markdown += `| ${row.join(' | ')} |
     `;
                 });
-    
+
                 navigator.clipboard.writeText(markdown).then(() => {
                     exportBtn.innerHTML = '<span class="export-icon">✓</span> Copied!';
                     exportBtn.classList.add('copied');
