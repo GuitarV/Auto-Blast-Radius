@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.71
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -69,7 +69,7 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.65',
+        VERSION: '1.71',
         CLUSTER:'bjs',
 
         // API 端点配置
