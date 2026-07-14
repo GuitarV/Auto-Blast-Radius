@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.65
+// @version      1.7
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -105,15 +105,31 @@
             { label: 'Power Feed', column: 'Power Feed' },
             { label: 'Rack Status', column: 'status' },
             { label: 'Rack Type', column: 'type' },
-            { label: 'Capacity', column: 'power_kva' }
+            { label: 'Capacity', column: 'power_kva' },
+            { label: 'Redundancy', column: 'power_redundancy' }
         ],
 
         // 显示名称映射
         DISPLAY_NAMES: {
-            'Lost Primary': 'At Risk - Primary Loss',
-            'Lost Secondary': 'At Risk - Secondary Loss',
-            'Partial Power Loss': 'At Risk - Partial Loss',
-            'Complete Power Loss': 'At Risk - Complete Loss'
+            'Partial Primary Loss': 'Partial S1 Loss',
+            'Partial Secondary Loss': 'Partial S2 Loss',
+            'Lost Primary': 'S1 Loss',
+            'Lost Secondary': 'S2 Loss',
+            'Partial Power Loss': 'Partial Loss',
+            'S1 + Partial S2 Loss': 'S1 + Partial S2 Loss',
+            'S2 + Partial S1 Loss': 'S2 + Partial S1 Loss',
+            'Complete Power Loss': 'Complete Loss'
+        },
+
+        TOOLTIPS: {
+            'Partial Primary Loss': 'S1侧有部分电路受影响但未全部丢失，S2侧完全正常。机柜仍在运行但S1冗余已降低。',
+            'Partial Secondary Loss': 'S2侧有部分电路受影响但未全部丢失，S1侧完全正常。机柜仍在运行但S2冗余已降低。',
+            'Lost Primary': 'S1侧所有电路全部丢失，机柜完全依赖S2侧供电，已无冗余保护。',
+            'Lost Secondary': 'S2侧所有电路全部丢失，机柜完全依赖S1侧供电，已无冗余保护。',
+            'Partial Power Loss': 'S1和S2两侧均有部分电路受影响，双侧冗余均已降低。',
+            'S1 + Partial S2 Loss': 'S1侧所有电路全部丢失，同时S2侧也有部分电路受影响。机柜仅靠S2部分电路维持供电，风险极高。',
+            'S2 + Partial S1 Loss': 'S2侧所有电路全部丢失，同时S1侧也有部分电路受影响。机柜仅靠S1部分电路维持供电，风险极高。',
+            'Complete Power Loss': '电路全部丢失，机柜完全断电。'
         },
 
         // 机柜类型映射
@@ -561,7 +577,6 @@
     async function loadDataFromLambda(site) {
         console.log('========================================');
         console.log('[LoadData] Starting load for site:', site);
-        console.log('[LoadData] Lambda URL:', CONFIG.API_ENDPOINTS.LAMBDA_URL);
 
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -574,7 +589,6 @@
                 data: JSON.stringify({ site: site, cluster: CONFIG.CLUSTER}),
                 onload: function(response) {
                     console.log('[LoadData] Response received');
-                    console.log('[LoadData] Status:', response.status);
                     console.log('[LoadData] Status Text:', response.statusText);
 
                     try {
@@ -1024,6 +1038,11 @@
             } else if (filter.column === 'power_kva') {
                 const capacities = [...new Set(Array.from(positionMap.values()).map(info => info.power_kva).filter(kva => kva !== null && kva !== undefined))].sort((a, b) => a - b);
                 capacities.forEach(capacity => select.append(new Option(capacity, capacity)));
+            } else if (filter.column === 'power_redundancy') {
+                const redundancies = [...new Set(Array.from(positionMap.values())
+                    .map(info => info.power_redundancy)
+                    .filter(r => r !== null && r !== undefined && r !== ''))].sort();
+                redundancies.forEach(r => select.append(new Option(r, r)));
             } else {
                 const options = [...new Set(EXCEL_DATA.map(item => {
                     if (filter.column.startsWith('routingInfo.')) return item.routingInfo?.[filter.column.split('.')[1]];
@@ -1117,7 +1136,11 @@
         let filteredData = EXCEL_DATA;
 
         try {
-            const stats = { total: 0, detailedStats: {}, euclidStats: { 'Lost Primary': 0, 'Lost Secondary': 0, 'Partial Power Loss': 0, 'Complete Power Loss': 0 } };
+            const stats = { total: 0, detailedStats: {}, euclidStats: {
+                'Partial Primary Loss': 0, 'Partial Secondary Loss': 0,
+                'Lost Primary': 0, 'Lost Secondary': 0,
+                'Partial Power Loss': 0, 'S1 + Partial S2 Loss': 0,
+                'S2 + Partial S1 Loss': 0, 'Complete Power Loss': 0 } };
             const expectedPowerByPosition = {};
 
             EXCEL_DATA.forEach(row => {
@@ -1146,6 +1169,10 @@
                     const positionKey = `${item['Position Room']}-${item['Position']}`;
                     const posInfo = positionMap.get(positionKey);
                     return values.some(v => parseFloat(v) === posInfo?.power_kva);
+                } else if (column === 'power_redundancy') {
+                    const positionKey = `${item['Position Room']}-${item['Position']}`;
+                    const posInfo = positionMap.get(positionKey);
+                    return values.includes(posInfo?.power_redundancy);
                 } else if (column === 'routingInfo.transformer') {
                     const routingValue = item.routingInfo?.transformer;
                     return values.some(v => String(routingValue || '').trim() === String(v).trim());
@@ -1217,8 +1244,10 @@
                         return values.includes(posInfo.room_name);
                     } else if (column === 'Position') {
                         return values.includes(posInfo.name);
+                    } else if (column === 'power_redundancy') {
+                        return values.includes(posInfo?.power_redundancy);
                     }
-                    return true; // 其他字段不适用于位置级别筛选
+                    return true;
                 };
 
                 positionMap.forEach((posInfo, positionKey) => {
@@ -1288,7 +1317,9 @@
             // 初始化统计
             const rackTypes = [...new Set(Object.values(positions).map(p => p.type.toUpperCase()))];
             rackTypes.forEach(type => {
-                stats.detailedStats[type] = { 'Lost Primary': 0, 'Lost Secondary': 0, 'Partial Power Loss': 0, 'Complete Power Loss': 0, 'Total': 0, euclidCount: { 'Lost Primary': 0, 'Lost Secondary': 0, 'Partial Power Loss': 0, 'Complete Power Loss': 0 } };
+                stats.detailedStats[type] = {
+                    'Partial Primary Loss': 0, 'Partial Secondary Loss': 0, 'Lost Primary': 0, 'Lost Secondary': 0, 'Partial Power Loss': 0, 'S1 + Partial S2 Loss': 0, 'S2 + Partial S1 Loss': 0, 'Complete Power Loss': 0, 'Total': 0,
+                    euclidCount: { 'Partial Primary Loss': 0, 'Partial Secondary Loss': 0, 'Lost Primary': 0, 'Lost Secondary': 0, 'Partial Power Loss': 0, 'S1 + Partial S2 Loss': 0, 'S2 + Partial S1 Loss': 0, 'Complete Power Loss': 0,} };
             });
 
             window.filteredPositions = {};
@@ -1298,6 +1329,48 @@
                     window.filteredPositions[positionKey] = { ...positions[positionKey], powerChains: [...positions[positionKey].powerChains], affectedPowerChains: [] };
                 }
             });
+
+            // ★ 修复：将 positionsToShow 中有但 filteredPositions 中缺失的位置同步进来
+            console.log('★ FIX EXECUTED, positionsToShow size:', positionsToShow.size);
+            positionsToShow.forEach(positionKey => {
+                if (!window.filteredPositions[positionKey] && positions[positionKey]) {
+                    window.filteredPositions[positionKey] = {
+                        ...positions[positionKey],
+                        powerChains: [...positions[positionKey].powerChains],
+                        affectedPowerChains: []
+                    };
+                }
+            });
+
+            // ★ 修复代码之后加这些诊断
+            console.log('★ filteredPositions size:', Object.keys(window.filteredPositions).length);
+
+            // 统计 type 分布
+            const typeCount = {};
+            Object.entries(window.filteredPositions).forEach(([k, v]) => {
+                const key = `${v.type}|${v.status}`;
+                typeCount[key] = (typeCount[key] || 0) + 1;
+            });
+            console.log('★ type|status breakdown:', JSON.stringify(typeCount));
+
+            // 看 Stats 循环中 positionMap.get 的结果
+            let statsHitCount = 0;
+            let statsMissCount = 0;
+            const missedKeys = [];
+            Object.entries(window.filteredPositions).forEach(([positionKey, position]) => {
+                const posInfo = positionMap.get(positionKey);
+                if (posInfo?.status === 'deployed' && posInfo?.type?.toUpperCase() !== 'PATCH') {
+                    statsHitCount++;
+                } else {
+                    statsMissCount++;
+                    missedKeys.push({key: positionKey, posInfoExists: !!posInfo,
+                        posInfoStatus: posInfo?.status, posInfoType: posInfo?.type,
+                        positionType: position.type, positionStatus: position.status});
+                }
+            });
+            console.log('★ Stats loop: HIT (counted):', statsHitCount, 'MISS (skipped):', statsMissCount);
+            console.log('★ Missed positions:', JSON.stringify(missedKeys));
+
 
             filteredData.forEach(row => {
                 const positionKey = `${row['Position Room']}-${row['Position']}`;
@@ -1329,15 +1402,13 @@
                     const isEuclid = posInfo?.is_brick === true;
 
                     if (!stats.detailedStats[type]) {
-                        stats.detailedStats[type] = { 'Lost Primary': 0, 'Lost Secondary': 0, 'Partial Power Loss': 0, 'Complete Power Loss': 0, 'Total': 0, euclidCount: { 'Lost Primary': 0, 'Lost Secondary': 0, 'Partial Power Loss': 0, 'Complete Power Loss': 0 } };
+                        stats.detailedStats[type] = { 'Partial Primary Loss': 0, 'Partial Secondary Loss': 0, 'Lost Primary': 0, 'Lost Secondary': 0, 'Partial Power Loss': 0, 'S1 + Partial S2 Loss': 0, 'S2 + Partial S1 Loss': 0, 'Complete Power Loss': 0, 'Total': 0, euclidCount: { 'Partial Primary Loss': 0, 'Partial Secondary Loss': 0, 'Lost Primary': 0, 'Lost Secondary': 0, 'Partial Power Loss': 0, 'S1 + Partial S2 Loss': 0, 'S2 + Partial S1 Loss': 0, 'Complete Power Loss': 0, } };
                     }
 
                     stats.detailedStats[type]['Total']++;
 
                     const hasPowerChainData = position.powerChains.some(chain => chain.circuit.name !== 'N/A');
                     if (!hasPowerChainData) {
-                        stats.detailedStats[type]['Complete Power Loss']++;
-                        if (isEuclid) stats.detailedStats[type].euclidCount['Complete Power Loss']++;
                         return;
                     }
 
@@ -1361,15 +1432,27 @@
                             if (remainingPrimary === 0 && remainingSecondary === 0) {
                                 stats.detailedStats[type]['Complete Power Loss']++;
                                 if (isEuclid) stats.detailedStats[type].euclidCount['Complete Power Loss']++;
-                            } else if (remainingPrimary === 0 && remainingSecondary > 0) {
+                            } else if (remainingPrimary === 0 && remainingSecondary > 0 && remainingSecondary < expected.secondary) {
+                                stats.detailedStats[type]['S1 + Partial S2 Loss']++;
+                                if (isEuclid) stats.detailedStats[type].euclidCount['S1 + Partial S2 Loss']++;
+                            } else if (remainingPrimary === 0 && remainingSecondary === expected.secondary) {
                                 stats.detailedStats[type]['Lost Primary']++;
                                 if (isEuclid) stats.detailedStats[type].euclidCount['Lost Primary']++;
-                            } else if (remainingSecondary === 0 && remainingPrimary > 0) {
+                            } else if (remainingSecondary === 0 && remainingPrimary > 0 && remainingPrimary < expected.primary) {
+                                stats.detailedStats[type]['S2 + Partial S1 Loss']++;
+                                if (isEuclid) stats.detailedStats[type].euclidCount['S2 + Partial S1 Loss']++;
+                            } else if (remainingSecondary === 0 && remainingPrimary === expected.primary) {
                                 stats.detailedStats[type]['Lost Secondary']++;
                                 if (isEuclid) stats.detailedStats[type].euclidCount['Lost Secondary']++;
                             } else if (remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) {
                                 stats.detailedStats[type]['Partial Power Loss']++;
                                 if (isEuclid) stats.detailedStats[type].euclidCount['Partial Power Loss']++;
+                            } else if (remainingPrimary < expected.primary && remainingPrimary > 0 && remainingSecondary === expected.secondary) {
+                                stats.detailedStats[type]['Partial Primary Loss']++;
+                                if (isEuclid) stats.detailedStats[type].euclidCount['Partial Primary Loss']++;
+                            } else if (remainingSecondary < expected.secondary && remainingSecondary > 0 && remainingPrimary === expected.primary) {
+                                stats.detailedStats[type]['Partial Secondary Loss']++;
+                                if (isEuclid) stats.detailedStats[type].euclidCount['Partial Secondary Loss']++;
                             }
                         }
                     } else {
@@ -1404,7 +1487,7 @@
             const activeRackTypes = rackTypes.filter(type => {
                 const typeStats = stats.detailedStats[type];
                 if (!typeStats) return false;
-                const totalCount = ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss'].reduce((sum, metric) => sum + (typeStats[metric] || 0), 0);
+                const totalCount = ['Partial Primary Loss', 'Partial Secondary Loss', 'Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'S1 + Partial S2 Loss', 'S2 + Partial S1 Loss' , 'Complete Power Loss'].reduce((sum, metric) => sum + (typeStats[metric] || 0), 0);
                 return totalCount > 0;
             });
 
@@ -1437,12 +1520,12 @@
 
             const downstreamStats = { totalUniqueDownstream: uniqueDownstreamRacks.size, racksList: downstreamRacksList };
 
-            // getPositionsForMetric 函数
-            function getPositionsForMetric(positionsObj, type, metric) {
+           function getPositionsForMetric(positionsObj, type, metric) {
                 const result = [];
                 Object.entries(window.filteredPositions).forEach(([key, position]) => {
                     const posInfo = positionMap.get(key);
-                    if (!posInfo || posInfo.type?.toUpperCase() !== type || posInfo.status !== 'deployed') return;
+                    const posType = (posInfo?.type || 'unknown').toUpperCase();
+                    if (!posInfo || posType !== type || posInfo.status !== 'deployed') return;
 
                     const expected = expectedPowerByPosition[key];
                     if (!expected) return;
@@ -1457,35 +1540,51 @@
                             if (metric === 'Complete Power Loss' && remainingPrimary === 0 && expected.primary > 0) result.push(`${position.room} ${position.position}`);
                             else if (metric === 'Lost Primary' && remainingPrimary < expected.primary && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
                         } else {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
+                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0)
+                                result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'S1 + Partial S2 Loss' && remainingPrimary === 0 && remainingSecondary > 0 && remainingSecondary < expected.secondary)
+                                result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0)
+                                result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'S2 + Partial S1 Loss' && remainingSecondary === 0 && remainingPrimary > 0 && remainingPrimary < expected.primary)
+                                result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0)
+                                result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0)
+                                result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Primary Loss' && remainingPrimary < expected.primary && remainingPrimary > 0 && remainingSecondary === expected.secondary)
+                                result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Secondary Loss' && remainingSecondary < expected.secondary && remainingSecondary > 0 && remainingPrimary === expected.primary)
+                                result.push(`${position.room} ${position.position}`);
                         }
                     } else {
                         if (!hasDualPower) {
                             if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0 && (expected.primary > 0 || expected.secondary > 0)) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
                         } else {
                             if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(`${position.room} ${position.position}`);
                             else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
                             else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
                             else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Primary Loss' && remainingPrimary < expected.primary && remainingPrimary > 0 && remainingSecondary === expected.secondary) result.push(`${position.room} ${position.position}`);
+                            else if (metric === 'Partial Secondary Loss' && remainingSecondary < expected.secondary && remainingSecondary > 0 && remainingPrimary === expected.primary) result.push(`${position.room} ${position.position}`);
                         }
                     }
                 });
                 return result;
             }
 
+
             // generateStatsCell 函数
             function generateStatsCell(type, metric, displayValue, positions) {
                 if (displayValue === 0 || metric === 'Total') return `<td class="stats-cell">${displayValue}</td>`;
 
-                const euclidCount = positions.filter(position => {
-                    const matchingKey = Object.keys(window.filteredPositions).find(key => {
-                        const pos = window.filteredPositions[key];
-                        return pos.position === position && positionMap.get(key)?.type?.toUpperCase() === type;
-                    });
+                    const euclidCount = positions.filter(position => {
+                        const matchingKey = Object.keys(window.filteredPositions).find(key => {
+                            const pos = window.filteredPositions[key];
+                            return `${pos.room} ${pos.position}` === position &&
+                                   positionMap.get(key)?.type?.toUpperCase() === type;
+                        });
                     if (!matchingKey) return false;
                     return positionMap.get(matchingKey)?.is_brick === true;
                 }).length;
@@ -1512,13 +1611,13 @@
                         <table class="stats-table">
                             <thead>
                                 <tr>
-                                    <th>Potential Power Impact</th>
+                                    <th style="white-space:normal; word-wrap:break-word;">Potential Power Impact(At Risk)</th>
                                     ${activeRackTypes.filter(type => type !== 'PATCH').map(type => `<th>${type === 'NETWORK' ? 'NETWORK(Euclid)' : type}</th>`).join('')}
                                     <th>Total</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss'].map(metric => {
+                                ${['Partial Primary Loss', 'Partial Secondary Loss', 'Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'S1 + Partial S2 Loss', 'S2 + Partial S1 Loss', 'Complete Power Loss'].map(metric => {
                                     const rowValues = activeRackTypes.filter(type => type !== 'PATCH').map(type => {
                                         const total = stats.detailedStats[type][metric];
                                         const positionsArray = getPositionsForMetric(window.positions, type, metric);
@@ -1526,15 +1625,16 @@
                                     });
                                     const displayName = CONFIG.DISPLAY_NAMES[metric];
                                     const rowTotal = activeRackTypes.filter(type => type !== 'PATCH').reduce((sum, type) => sum + (stats.detailedStats[type][metric] || 0), 0);
-                                    return `<tr><td>${displayName}</td>${rowValues.join('')}<td class="stats-cell">${rowTotal}</td></tr>`;
+                                    const tooltip = CONFIG.TOOLTIPS[metric] || '';
+                                    return `<tr><td title="${tooltip}" style="cursor:help">${displayName}</td>${rowValues.join('')}<td class="stats-cell">${rowTotal}</td></tr>`;
                                 }).join('')}
                                 <tr class="total-row">
                                     <td>Total</td>
                                     ${activeRackTypes.filter(type => type !== 'PATCH').map(type => {
-                                        const totalCount = ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss'].reduce((sum, metric) => sum + (stats.detailedStats[type][metric] || 0), 0);
+                                        const totalCount = ['Partial Primary Loss', 'Partial Secondary Loss', 'Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'S1 + Partial S2 Loss', 'S2 + Partial S1 Loss', 'Complete Power Loss'].reduce((sum, metric) => sum + (stats.detailedStats[type][metric] || 0), 0);
                                         return generateStatsCell(type, 'Total', totalCount, []);
                                     }).join('')}
-                                    <td class="stats-cell">${activeRackTypes.filter(type => type !== 'PATCH').reduce((sum, type) => sum + ['Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'Complete Power Loss'].reduce((subSum, metric) => subSum + (stats.detailedStats[type][metric] || 0), 0), 0)}</td>
+                                    <td class="stats-cell">${activeRackTypes.filter(type => type !== 'PATCH').reduce((sum, type) => sum + ['Partial Primary Loss', 'Partial Secondary Loss', 'Lost Primary', 'Lost Secondary', 'Partial Power Loss', 'S1 + Partial S2 Loss', 'S2 + Partial S1 Loss', 'Complete Power Loss'].reduce((subSum, metric) => subSum + (stats.detailedStats[type][metric] || 0), 0), 0)}</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -2801,7 +2901,7 @@
         .stats-details { flex: 1; overflow-x: auto; }
         .stats-table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); table-layout: fixed; }
         .stats-table th, .stats-table td { padding: 12px; text-align: center; border: 1px solid #e0e0e0; }
-        .stats-table th { background: #f5f5f5; font-weight: bold; color: #333; font-size: 14px; white-space: nowrap; }
+        .stats-table th { background: #f5f5f5; font-weight: bold; color: #333; font-size: 14px; white-space: nowrap;}
         .stats-table th:first-child, .stats-table td:first-child { width: 180px; text-align: left; font-weight: bold; background: #f5f5f5; }
         .stats-table th:last-child, .stats-table td:last-child { background-color: #f5f5f5; font-weight: bold; border-left: 2px solid #e0e0e0; }
         .stats-cell { font-family: 'Arial', sans-serif; font-weight: bold; color: #000000; font-size: 14px; text-align: center; }
