@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.71
+// @version      1.72
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -69,7 +69,7 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.71',
+        VERSION: '1.72',
         CLUSTER:'bjs',
 
         // API 端点配置
@@ -130,6 +130,17 @@
             'S1 + Partial S2 Loss': 'S1侧所有电路全部丢失，同时S2侧也有部分电路受影响。机柜仅靠S2部分电路维持供电，风险极高。',
             'S2 + Partial S1 Loss': 'S2侧所有电路全部丢失，同时S1侧也有部分电路受影响。机柜仅靠S1部分电路维持供电，风险极高。',
             'Complete Power Loss': '电路全部丢失，机柜完全断电。'
+        },
+
+        TOOLTIP_IMAGES:{
+            'Partial Primary Loss': 'https://w.amazon.com/bin/download/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius/WebHome/Partial%20S1%20Loss.png',
+            'Partial Secondary Loss': 'https://w.amazon.com/bin/download/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius/WebHome/Partial%20S2%20Loss.png',
+            'Lost Primary': 'https://w.amazon.com/bin/download/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius/WebHome/S1%20Loss.png',
+            'Lost Secondary': 'https://w.amazon.com/bin/download/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius/WebHome/S2%20Loss.png',
+            'Partial Power Loss': 'https://w.amazon.com/bin/download/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius/WebHome/Partial%20Loss.png',
+            'S1 + Partial S2 Loss': 'https://w.amazon.com/bin/download/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius/WebHome/S1%20%20%20Partial%20S2%20Loss.png',
+            'S2 + Partial S1 Loss': 'https://w.amazon.com/bin/download/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius/WebHome/S2%20%20%20Partial%20S1%20Loss.png',
+            'Complete Power Loss': 'https://w.amazon.com/bin/download/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius/WebHome/Complete%20Loss.png'
         },
 
         // 机柜类型映射
@@ -1626,7 +1637,21 @@
                                     const displayName = CONFIG.DISPLAY_NAMES[metric];
                                     const rowTotal = activeRackTypes.filter(type => type !== 'PATCH').reduce((sum, type) => sum + (stats.detailedStats[type][metric] || 0), 0);
                                     const tooltip = CONFIG.TOOLTIPS[metric] || '';
-                                    return `<tr><td title="${tooltip}" style="cursor:help">${displayName}</td>${rowValues.join('')}<td class="stats-cell">${rowTotal}</td></tr>`;
+                                    const imgUrl = CONFIG.TOOLTIP_IMAGES[metric] || '';
+                                    return `<tr>
+                                        <td style="position:relative;">
+                                            <div class="risk-label-wrapper">
+                                                ${displayName}
+                                                ${imgUrl ? `
+                                                <div class="risk-tooltip-img">
+                                                    <img src="${imgUrl}" alt="${displayName}"/>
+                                                    <div class="tooltip-text">${tooltip}</div>
+                                                </div>` : ''}
+                                            </div>
+                                        </td>
+                                        ${rowValues.join('')}
+                                        <td class="stats-cell">${rowTotal}</td>
+                                    </tr>`;
                                 }).join('')}
                                 <tr class="total-row">
                                     <td>Total</td>
@@ -1726,10 +1751,11 @@
             contentContainer.innerHTML = `
                 <h3 class="section-title summary-title">Summary Table</h3>
                 ${statsHtml}
-                ${positionsCountHtml}
                 <h3 class="section-title detail-title">Detail Info</h3>
+                ${positionsCountHtml}
                 <div class="positions-container">${positionsHtml}</div>
             `;
+
 
             // 初始化筛选器
             if (!window.filtersInitialized) {
@@ -3023,318 +3049,63 @@
         }
 
         /* 内嵌逻辑选择器 - 简洁蓝色风格 */
-        .stats-header-row {
-            display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-
-        .filter-logic-inline {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .logic-label {
-            font-size: 12px;
-            font-weight: 600;
-            color: #1976d2;
-        }
-
-        .logic-toggle {
-            display: flex;
-            border-radius: 4px;
-            overflow: hidden;
-            border: 1px solid #1976d2;
-            background: white;
-        }
-
-        .logic-btn-sm {
-            padding: 4px 12px;
-            border: none;
-            background: white;
-            color: #1976d2;
-            font-weight: 600;
-            font-size: 11px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            line-height: 1.2;
-        }
-
-        .logic-btn-sm:first-child {
-            border-right: 1px solid #1976d2;
-        }
-
-        .logic-btn-sm:hover {
-            background: #e3f2fd;
-        }
-
-        .logic-btn-sm.active {
-            background: #1976d2;
-            color: white;
-        }
+        .stats-header-row { display: flex; justify-content: flex-end; align-items: center; margin-bottom: 10px; }
+        .filter-logic-inline { display: flex; align-items: center; gap: 8px; }
+        .logic-label { font-size: 12px; font-weight: 600; color: #1976d2; }
+        .logic-toggle { display: flex; border-radius: 4px; overflow: hidden; border: 1px solid #1976d2; background: white; }
+        .logic-btn-sm { padding: 4px 12px; border: none; background: white; color: #1976d2; font-weight: 600; font-size: 11px; cursor: pointer; transition: all 0.2s ease; line-height: 1.2; }
+        .logic-btn-sm:first-child { border-right: 1px solid #1976d2; }
+        .logic-btn-sm:hover { background: #e3f2fd; }
+        .logic-btn-sm.active { background: #1976d2; color: white; }
 
         /* AI 查询区域 */
-        .ai-query-section {
-            margin: 15px 0;
-            background: #f8f9fa;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
+        .ai-query-section { margin: 15px 0; background: #f8f9fa; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+        .ai-query-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; cursor: pointer; user-select: none; }
+        .ai-query-title { display: flex; align-items: center; font-weight: 600; font-size: 15px; }
+        .ai-query-title .ai-icon { font-size: 20px; margin-right: 10px; }
+        .ai-toggle { font-size: 14px; transition: transform 0.3s ease; }
+        .ai-query-section.collapsed .ai-toggle { transform: rotate(-90deg); }
+        .ai-query-content { padding: 15px 20px; background: white; max-height: 500px; overflow-y: auto; transition: max-height 0.3s ease, padding 0.3s ease; }
+        .ai-query-section.collapsed .ai-query-content { max-height: 0; padding: 0 20px; }
+        .ai-query-container { background: white; padding: 15px; border-radius: 6px; }
+        .ai-input-wrapper { display: flex; gap: 10px; margin-bottom: 15px; }
+        .ai-query-input { flex: 1; padding: 10px; border: 2px solid #e0e0e0; border-radius: 6px; font-size: 14px; resize: vertical; font-family: inherit; }
+        .ai-query-input:focus { outline: none; border-color: #667eea; }
+        .ai-query-button { padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.3s; }
+        .ai-query-button:hover:not(:disabled) { background: #5568d3; transform: translateY(-2px); }
+        .ai-query-button:disabled { background: #ccc; cursor: not-allowed; }
+        .ai-loading { text-align: center; padding: 20px; color: #667eea; font-weight: 600; }
+        .ai-success { background: #e8f5e9; border: 1px solid #4caf50; padding: 15px; border-radius: 6px; }
+        .ai-error { background: #ffebee; border: 1px solid #f44336; padding: 15px; border-radius: 6px; color: #c62828; }
+        .ai-actions { margin-top: 15px; display: flex; gap: 10px; }
+        .ai-clear-filters { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+        .ai-buttons-group { display: flex; flex-direction: column; gap: 6px; min-width: fit-content; }
+        .ai-analyze-btn { padding: 8px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; transition: opacity 0.2s; }
+        .ai-analyze-btn:hover { opacity: 0.9; }
+        .ai-analyze-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .ai-clear-filters { background: #ff9800; color: white; }
+        .ai-clear-filters:hover { background: #f57c00; }
+        .ai-analysis-container { margin-top: 15px; }
+        .ai-analysis-result { background: #fff3e0; border: 2px solid #ff9800; border-radius: 6px; overflow-y: auto; max-height: 600px; }
+        .analysis-header { background: #ff9800; color: white; padding: 12px 15px; display: flex; justify-content: space-between; align-items: center; }
+        .analysis-header h3 { margin: 0; font-size: 16px; }
+        .close-analysis { background: none; border: none; color: white; font-size: 20px; cursor: pointer; padding: 0; width: 24px; height: 24px; }
+        .analysis-content { padding: 15px; line-height: 1.6; }
+        .analysis-footer { padding: 10px 15px; background: #ffe0b2; border-top: 1px solid #ffb74d; text-align: right; }
+        .ai-query-examples { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .examples-label { font-size: 12px; color: #666; font-weight: 600; }
+        .example-query { padding: 4px 10px; background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        .example-query:hover { background: #667eea; color: white; border-color: #667eea; }
 
-        .ai-query-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .ai-query-title {
-            display: flex;
-            align-items: center;
-            font-weight: 600;
-            font-size: 15px;
-        }
-
-        .ai-query-title .ai-icon {
-            font-size: 20px;
-            margin-right: 10px;
-        }
-
-        .ai-toggle {
-            font-size: 14px;
-            transition: transform 0.3s ease;
-        }
-
-        .ai-query-section.collapsed .ai-toggle {
-            transform: rotate(-90deg);
-        }
-
-        .ai-query-content {
-            padding: 15px 20px;
-            background: white;
-            max-height: 500px;
-            overflow-y: auto;
-            transition: max-height 0.3s ease, padding 0.3s ease;
-        }
-
-        .ai-query-section.collapsed .ai-query-content {
-            max-height: 0;
-            padding: 0 20px;
-        }
-
-        /* AI 查询容器内部样式保持不变 */
-        .ai-query-container {
-            /* 原有样式 */
-        }
+        /* 风险类别图片悬浮提示 */
+        .risk-label-wrapper { position: relative; display: inline-block; cursor: help; }
+        .risk-tooltip-img { display: none; position: absolute; left: 0; top: 100%; margin-left: 10px; z-index: 9999; background: white; border: 2px solid #90caf9; border-radius: 8px; padding: 5px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        tr:nth-child(n+5) .risk-tooltip-img { top: auto; bottom: 0; }
+        .risk-tooltip-img img { max-width: 400px; max-height: 250px; display: block; border-radius: 4px; }
+        .risk-tooltip-img .tooltip-text { font-size: 12px; color: #666; text-align: center; margin-top: 4px; padding: 0 4px; }
+        .risk-label-wrapper:hover .risk-tooltip-img { display: block; }
 
 
-        .ai-query-container {
-            background: white;
-            padding: 15px;
-            border-radius: 6px;
-        }
-
-        .ai-input-wrapper {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 15px;
-        }
-
-        .ai-query-input {
-            flex: 1;
-            padding: 10px;
-            border: 2px solid #e0e0e0;
-            border-radius: 6px;
-            font-size: 14px;
-            resize: vertical;
-            font-family: inherit;
-        }
-
-        .ai-query-input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        .ai-query-button {
-            padding: 10px 20px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-
-        .ai-query-button:hover:not(:disabled) {
-            background: #5568d3;
-            transform: translateY(-2px);
-        }
-
-        .ai-query-button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-
-        .ai-loading {
-            text-align: center;
-            padding: 20px;
-            color: #667eea;
-            font-weight: 600;
-        }
-
-        .ai-success {
-            background: #e8f5e9;
-            border: 1px solid #4caf50;
-            padding: 15px;
-            border-radius: 6px;
-        }
-
-        .ai-error {
-            background: #ffebee;
-            border: 1px solid #f44336;
-            padding: 15px;
-            border-radius: 6px;
-            color: #c62828;
-        }
-
-        .ai-actions {
-            margin-top: 15px;
-            display: flex;
-            gap: 10px;
-        }
-
-        .ai-clear-filters {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 600;
-            transition: all 0.2s;
-        }
-
-        .ai-buttons-group {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            min-width: fit-content;
-        }
-
-        .ai-analyze-btn {
-            padding: 8px 16px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
-            white-space: nowrap;
-            transition: opacity 0.2s;
-        }
-
-        .ai-analyze-btn:hover {
-            opacity: 0.9;
-        }
-
-        .ai-analyze-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .ai-clear-filters {
-            background: #ff9800;
-            color: white;
-        }
-
-        .ai-clear-filters:hover {
-            background: #f57c00;
-        }
-
-        .ai-analysis-container {
-            margin-top: 15px;
-        }
-
-        .ai-analysis-result {
-            background: #fff3e0;
-            border: 2px solid #ff9800;
-            border-radius: 6px;
-            overflow-y: auto;
-            max-height: 600px;
-        }
-
-        .analysis-header {
-            background: #ff9800;
-            color: white;
-            padding: 12px 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .analysis-header h3 {
-            margin: 0;
-            font-size: 16px;
-        }
-
-        .close-analysis {
-            background: none;
-            border: none;
-            color: white;
-            font-size: 20px;
-            cursor: pointer;
-            padding: 0;
-            width: 24px;
-            height: 24px;
-        }
-
-        .analysis-content {
-            padding: 15px;
-            line-height: 1.6;
-        }
-
-        .analysis-footer {
-            padding: 10px 15px;
-            background: #ffe0b2;
-            border-top: 1px solid #ffb74d;
-            text-align: right;
-        }
-
-        .ai-query-examples {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        .examples-label {
-            font-size: 12px;
-            color: #666;
-            font-weight: 600;
-        }
-
-        .example-query {
-            padding: 4px 10px;
-            background: #f5f5f5;
-            border: 1px solid #e0e0e0;
-            border-radius: 4px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .example-query:hover {
-            background: #667eea;
-            color: white;
-            border-color: #667eea;
-        }
     `);
 
     // 页面加载初始化
