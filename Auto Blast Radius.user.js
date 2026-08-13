@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.72
+// @version      1.73
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -69,7 +69,7 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.72',
+        VERSION: '1.73',
         CLUSTER:'bjs',
 
         // API 端点配置
@@ -145,28 +145,28 @@
 
         // 机柜类型映射
         RACK_TYPE_MAPPING: {
-                'NETWORK': 'Network', 'Security': 'Network', 'Fusion Even Prim': 'Network', 'Fusion Odd Prim': 'Network',
-                'Network Core - W': 'Network', 'Network Core - E': 'Network', 'BMS': 'Network', 'Network Edge': 'Network',
-                'AGG - EC2': 'Network', 'CHRONOS': 'Network', 'UMN': 'Network', 'Network Border': 'Network',
-                'Network Core': 'Network', 'Network Enterpri': 'Network', 'Network Manageme': 'Network',
-                'Network L7 - JLB': 'Network', 'Network Buffer': 'Network', 'Network Optical': 'Network',
-                'Network Aggregat': 'Network', 'Network VPC-DX': 'Network', 'Network Catzilla': 'Network',
-                'Network L7': 'Network', 'Network CI': 'Network', 'Network Enterprise': 'Network', 'Network Build': 'Network',
-                '12.8T ES BFC SP': 'Network', '12.8T BFC BR': 'Network', '12.8T ES EUC SP': 'Network', 'Fission': 'Network',
-                'WS BFC BR': 'Network', 'ES BFC SP': 'Network', 'AGG - PROD': 'Network', 'AGG-PROD': 'Network',
-                'Agg - Prod': 'Network', 'AGG - Prod': 'Network', 'AGG-EC2': 'Network', 'Agg - EC2': 'Network',
-                'PATO': 'Network', 'CI/NVR': 'Network', 'BFC BR': 'Network', 'Border': 'Network', 'Optical': 'Network',
-                'VPC': 'Network', 'STORM': 'Network', 'ES EUC SP': 'Network', 'ES BFC BR': 'Network', 'WS EUC SP': 'Network',
-                'WS BFC SP': 'Network', 'LBIR': 'Network', 'Fusion Secondary': 'Network', 'CI': 'Network',
-                'WS UMN': 'Network', 'ES UMN': 'Network', 'L7-JLB': 'Network', 'WMW Puffin Med': 'Network',
-                'IRON RACK': 'Network', 'Data Center Oper': 'Network', 'Bulk Fiber': 'Network', 'CloudFront': 'Network',
-                'Edge': 'Network', 'Corp': 'Network', 'DCO': 'Network', 'FPOD': 'Network', 'Migration Prog': 'Network',
-                'EC2': 'EC2', 'Enterprise': 'EC2', 'S3': 'EC2', 'EBS': 'EBS',
-                'Production': 'Production', 'AWS Prod': 'Production', 'AWS-Prod': 'Production', 'Bering Rack': 'Production',
-                'Bering Tape Rack': 'Production', 'SERVER': 'Production', 'Classic-Prod': 'Production',
-                'Classic Prod': 'Production', 'GPS': 'Production', 'AWS': 'Production',
-                'PATCH': 'Patch', 'NONRACK': 'NonRack', 'Thermal': 'Patch', 'ATS': 'Patch', 'IDF Row': 'Patch',
-                'Cabling Infrastr': 'Mini rack', 'OH_MINIRACK': 'Mini rack',
+            'NETWORK': 'Network', 'Security': 'Network', 'Fusion Even Prim': 'Network', 'Fusion Odd Prim': 'Network',
+            'Network Core - W': 'Network', 'Network Core - E': 'Network', 'BMS': 'Network', 'Network Edge': 'Network',
+            'AGG - EC2': 'Network', 'CHRONOS': 'Network', 'UMN': 'Network', 'Network Border': 'Network',
+            'Network Core': 'Network', 'Network Enterpri': 'Network', 'Network Manageme': 'Network',
+            'Network L7 - JLB': 'Network', 'Network Buffer': 'Network', 'Network Optical': 'Network',
+            'Network Aggregat': 'Network', 'Network VPC-DX': 'Network', 'Network Catzilla': 'Network',
+            'Network L7': 'Network', 'Network CI': 'Network', 'Network Enterprise': 'Network', 'Network Build': 'Network',
+            '12.8T ES BFC SP': 'Network', '12.8T BFC BR': 'Network', '12.8T ES EUC SP': 'Network', 'Fission': 'Network',
+            'WS BFC BR': 'Network', 'ES BFC SP': 'Network', 'AGG - PROD': 'Network', 'AGG-PROD': 'Network',
+            'Agg - Prod': 'Network', 'AGG - Prod': 'Network', 'AGG-EC2': 'Network', 'Agg - EC2': 'Network',
+            'PATO': 'Network', 'CI/NVR': 'Network', 'BFC BR': 'Network', 'Border': 'Network', 'Optical': 'Network',
+            'VPC': 'Network', 'STORM': 'Network', 'ES EUC SP': 'Network', 'ES BFC BR': 'Network', 'WS EUC SP': 'Network',
+            'WS BFC SP': 'Network', 'LBIR': 'Network', 'Fusion Secondary': 'Network', 'CI': 'Network',
+            'WS UMN': 'Network', 'ES UMN': 'Network', 'L7-JLB': 'Network', 'WMW Puffin Med': 'Network',
+            'IRON RACK': 'Network', 'Data Center Oper': 'Network', 'Bulk Fiber': 'Network', 'CloudFront': 'Network',
+            'Edge': 'Network', 'Corp': 'Network', 'DCO': 'Network', 'FPOD': 'Network', 'Migration Prog': 'Network',
+            'EC2': 'EC2', 'Enterprise': 'EC2', 'S3': 'EC2', 'EBS': 'EBS',
+            'Production': 'Production', 'AWS Prod': 'Production', 'AWS-Prod': 'Production', 'Bering Rack': 'Production',
+            'Bering Tape Rack': 'Production', 'SERVER': 'Production', 'Classic-Prod': 'Production',
+            'Classic Prod': 'Production', 'GPS': 'Production', 'AWS': 'Production',
+            'PATCH': 'Patch', 'NONRACK': 'NonRack', 'Thermal': 'Patch', 'ATS': 'Patch', 'IDF Row': 'Patch',
+            'Cabling Infrastr': 'Mini rack', 'OH_MINIRACK': 'Mini rack',
         },
     };
 
@@ -460,7 +460,7 @@
                 const aiSection = this.closest('.ai-query-section');
                 aiSection.classList.toggle('collapsed');
             }
-        )};
+                                     )};
 
         // 事件委托处理动态按钮
         document.addEventListener('click', function(e) {
@@ -691,7 +691,7 @@
                             }) : Promise.resolve('');
 
                             Promise.all([fetchPrimary, fetchSecondary]).then(([primaryRaw, secondaryRaw]) => {
-                            // ========== 改动结束 ==========
+                                // ========== 改动结束 ==========
 
                                 // 以下逻辑与原版完全一致，未做任何修改
                                 let primaryData, secondaryData;
@@ -982,6 +982,9 @@
                 Object.entries(positionData).forEach(([key, item]) => {
                     if (!item || typeof item !== 'object') return;
                     if (item.type === 'OH_MINIRACK' || item.type === 'NONRACK') return;
+                    // 过滤非机房区域
+                    const excludedRooms = ['training', 'training_room', 'traininglab', 'parkinglot', 'office', 'cgfoffice', 'warehouse'];
+                    if (excludedRooms.some(r => item.room_name?.toLowerCase().includes(r))) return;
 
                     const networkInfo = networkDataMap.get(item.legacy_position_id) || { is_brick: false, hostname: null };
                     const downstreamRacks = networkInfo.is_brick ? downstreamRacksMap.get(item.legacy_position_id) || [] : null;
@@ -991,7 +994,8 @@
                     if (item.intended_customer) {
                         rackType = CONFIG.RACK_TYPE_MAPPING[item.intended_customer] || 'unknown';
                         if (rackType === 'unknown' || item.intended_customer === 'ANY') rackType = item.uplink_fabric.toUpperCase();
-                        if (rackType === 'Network' && parseFloat(item.power_kva) === 0) rackType = 'Patch';
+                        const kva = parseFloat(item.power_kva);
+                        if (rackType.toUpperCase() === 'NETWORK' && (kva === 0 || isNaN(kva))) rackType = 'Patch';
                     }
 
                     newPositionMap.set(`${item.room_name}-${item.name}`, {
@@ -1051,8 +1055,8 @@
                 capacities.forEach(capacity => select.append(new Option(capacity, capacity)));
             } else if (filter.column === 'power_redundancy') {
                 const redundancies = [...new Set(Array.from(positionMap.values())
-                    .map(info => info.power_redundancy)
-                    .filter(r => r !== null && r !== undefined && r !== ''))].sort();
+                                                 .map(info => info.power_redundancy)
+                                                 .filter(r => r !== null && r !== undefined && r !== ''))].sort();
                 redundancies.forEach(r => select.append(new Option(r, r)));
             } else {
                 const options = [...new Set(EXCEL_DATA.map(item => {
@@ -1235,7 +1239,7 @@
 
             // 检查是否只有非电力相关的筛选条件
             const hasOnlyNonPowerFilters = activeFilterEntries.length === 0 ||
-                activeFilterEntries.every(([col]) => !powerRelatedFilters.includes(col));
+                  activeFilterEntries.every(([col]) => !powerRelatedFilters.includes(col));
 
             // 处理没有电力数据但需要显示的位置
             if (hasOnlyNonPowerFilters && activeFilterEntries.length > 0) {
@@ -1375,8 +1379,8 @@
                 } else {
                     statsMissCount++;
                     missedKeys.push({key: positionKey, posInfoExists: !!posInfo,
-                        posInfoStatus: posInfo?.status, posInfoType: posInfo?.type,
-                        positionType: position.type, positionStatus: position.status});
+                                     posInfoStatus: posInfo?.status, posInfoType: posInfo?.type,
+                                     positionType: position.type, positionStatus: position.status});
                 }
             });
             console.log('★ Stats loop: HIT (counted):', statsHitCount, 'MISS (skipped):', statsMissCount);
@@ -1394,7 +1398,7 @@
             // Patch racks 统计
             stats.patchRacks = { total: 0, positions: [] };
             Array.from(positionMap.entries()).forEach(([positionKey, posInfo]) => {
-                if (posInfo?.type?.toUpperCase() === 'PATCH') {
+                if (posInfo?.type?.toUpperCase() === 'PATCH' && posInfo?.status === 'deployed') {
                     stats.patchRacks.total++;
                     stats.patchRacks.positions.push({ room: posInfo.room_name, position: posInfo.name });
                 }
@@ -1531,7 +1535,7 @@
 
             const downstreamStats = { totalUniqueDownstream: uniqueDownstreamRacks.size, racksList: downstreamRacksList };
 
-           function getPositionsForMetric(positionsObj, type, metric) {
+            function getPositionsForMetric(positionsObj, type, metric) {
                 const result = [];
                 Object.entries(window.filteredPositions).forEach(([key, position]) => {
                     const posInfo = positionMap.get(key);
@@ -1590,12 +1594,12 @@
             function generateStatsCell(type, metric, displayValue, positions) {
                 if (displayValue === 0 || metric === 'Total') return `<td class="stats-cell">${displayValue}</td>`;
 
-                    const euclidCount = positions.filter(position => {
-                        const matchingKey = Object.keys(window.filteredPositions).find(key => {
-                            const pos = window.filteredPositions[key];
-                            return `${pos.room} ${pos.position}` === position &&
-                                   positionMap.get(key)?.type?.toUpperCase() === type;
-                        });
+                const euclidCount = positions.filter(position => {
+                    const matchingKey = Object.keys(window.filteredPositions).find(key => {
+                        const pos = window.filteredPositions[key];
+                        return `${pos.room} ${pos.position}` === position &&
+                            positionMap.get(key)?.type?.toUpperCase() === type;
+                    });
                     if (!matchingKey) return false;
                     return positionMap.get(matchingKey)?.is_brick === true;
                 }).length;
@@ -1691,17 +1695,17 @@
 
             // 生成位置HTML
             const positionsHtml = Object.entries(positions)
-                .filter(([key]) => positionsToShow.has(key))
-                .sort(([keyA], [keyB]) => String(keyA).localeCompare(String(keyB), undefined, {numeric: true}))
-                .map(([key, position]) => {
-                    const positionInfo = positionMap.get(key);
-                    if (!positionInfo) return '';
+            .filter(([key]) => positionsToShow.has(key))
+            .sort(([keyA], [keyB]) => String(keyA).localeCompare(String(keyB), undefined, {numeric: true}))
+            .map(([key, position]) => {
+                const positionInfo = positionMap.get(key);
+                if (!positionInfo) return '';
 
-                    const isEuclid = positionInfo.is_brick === true;
-                    const euclidDownstreamData = isEuclid && positionInfo.downstreamRacks ?
-                        JSON.stringify({ hostname: positionInfo.hostname || 'Unknown', room: positionInfo.room_name, position: positionInfo.name, downstreamRacks: positionInfo.downstreamRacks }).replace(/'/g, '&#39;').replace(/"/g, '&quot;') : '';
+                const isEuclid = positionInfo.is_brick === true;
+                const euclidDownstreamData = isEuclid && positionInfo.downstreamRacks ?
+                      JSON.stringify({ hostname: positionInfo.hostname || 'Unknown', room: positionInfo.room_name, position: positionInfo.name, downstreamRacks: positionInfo.downstreamRacks }).replace(/'/g, '&#39;').replace(/"/g, '&quot;') : '';
 
-                    return `
+                return `
                     <div class="topo-item ${isEuclid ? 'euclid-brick' : ''}">
                         <div class="topo-item-header">
                             <div class="position-info">
@@ -1875,8 +1879,8 @@
                 `Downstream Racks (${downstreamRacks.length}):`,
                 '',
                 ...downstreamRacks
-                    .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
-                    .map(rack => `${rack.room} ${rack.position} | ${rack.rack_type || 'N/A'} | ${rack.fabric || 'N/A'}`)
+                .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
+                .map(rack => `${rack.room} ${rack.position} | ${rack.rack_type || 'N/A'} | ${rack.fabric || 'N/A'}`)
             ].join('\n');
 
             modal.querySelector('.modal-header').innerHTML = `
@@ -1895,12 +1899,12 @@
                     <table class="euclid-downstream-table">
                         <thead><tr><th>Position</th><th>Rack Type</th><th>Fabric</th></tr></thead>
                         <tbody>${downstreamRacks.length > 0 ?
-                            downstreamRacks
-                                .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
-                                .map(rack => `<tr><td>${rack.room} ${rack.position}</td><td>${rack.rack_type || 'N/A'}</td><td>${rack.fabric || 'N/A'}</td></tr>`)
-                                .join('') :
-                            '<tr><td colspan="3" class="no-data">No downstream racks found</td></tr>'
-                        }</tbody>
+                downstreamRacks
+                .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
+                .map(rack => `<tr><td>${rack.room} ${rack.position}</td><td>${rack.rack_type || 'N/A'}</td><td>${rack.fabric || 'N/A'}</td></tr>`)
+                .join('') :
+            '<tr><td colspan="3" class="no-data">No downstream racks found</td></tr>'
+        }</tbody>
                     </table>
                 </div>`;
 
@@ -1953,8 +1957,8 @@
                         const metric = cell.dataset.metric;
                         const positions = JSON.parse(cell.dataset.positions);
                         const positionsText = positions
-                            .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
-                            .join('\n');
+                        .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
+                        .join('\n');
 
                         modal.querySelector('.modal-header').innerHTML = `
                             <div class="modal-title">${type} - ${CONFIG.DISPLAY_NAMES[metric]} (${positions.length} positions)</div>
@@ -1966,31 +1970,31 @@
                         modal.querySelector('.position-list').innerHTML = positions
                             .sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}))
                             .map(position => {
-                                const matchingPosition = Object.entries(window.positions).find(([key, pos]) =>
-                                    `${pos.room} ${pos.position}` === position && pos.type.toUpperCase() === type
-                                );
-                                if (!matchingPosition) return '';
+                            const matchingPosition = Object.entries(window.positions).find(([key, pos]) =>
+                                                                                           `${pos.room} ${pos.position}` === position && pos.type.toUpperCase() === type
+                                                                                          );
+                            if (!matchingPosition) return '';
 
-                                const [positionKey] = matchingPosition;
-                                const posInfo = positionMap.get(positionKey);
-                                const isEuclid = posInfo?.is_brick === true;
+                            const [positionKey] = matchingPosition;
+                            const posInfo = positionMap.get(positionKey);
+                            const isEuclid = posInfo?.is_brick === true;
 
-                                let euclidDataAttr = '';
-                                if (isEuclid && posInfo.downstreamRacks) {
-                                    euclidDataAttr = `data-euclid-info="${encodeURIComponent(JSON.stringify({
-                                        hostname: posInfo.hostname || 'Unknown',
-                                        room: posInfo.room_name,
-                                        position: posInfo.name,
-                                        downstreamRacks: posInfo.downstreamRacks
-                                    }))}"`;
-                                }
+                            let euclidDataAttr = '';
+                            if (isEuclid && posInfo.downstreamRacks) {
+                                euclidDataAttr = `data-euclid-info="${encodeURIComponent(JSON.stringify({
+                                    hostname: posInfo.hostname || 'Unknown',
+                                    room: posInfo.room_name,
+                                    position: posInfo.name,
+                                    downstreamRacks: posInfo.downstreamRacks
+                                }))}"`;
+                            }
 
-                                return `
+                            return `
                                     <div class="position-item ${isEuclid ? 'euclid-position' : ''}">
                                         <span class="position-name">${position}</span>
                                         ${isEuclid ? `<span class="euclid-indicator clickable" ${euclidDataAttr} title="Click to view downstream racks">Euclid (${posInfo.downstreamRacks?.length || 0})</span>` : ''}
                                     </div>`;
-                            })
+                        })
                             .filter(html => html)
                             .join('');
 
@@ -2000,9 +2004,9 @@
                     } else if (cell.dataset.patchPositions) {
                         const positions = JSON.parse(cell.dataset.patchPositions);
                         const positionsText = positions
-                            .sort((a, b) => `${a.room} ${a.position}`.localeCompare(`${b.room} ${b.position}`, undefined, {numeric: true}))
-                            .map(pos => `${pos.room} ${pos.position}`)
-                            .join('\n');
+                        .sort((a, b) => `${a.room} ${a.position}`.localeCompare(`${b.room} ${b.position}`, undefined, {numeric: true}))
+                        .map(pos => `${pos.room} ${pos.position}`)
+                        .join('\n');
 
                         modal.querySelector('.modal-header').innerHTML = `
                             <div class="modal-title">Patch racks (${positions.length} positions)</div>
@@ -2024,9 +2028,9 @@
                         if (!positions.length) return;
 
                         const positionsText = positions
-                            .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
-                            .map(pos => `${pos.room} ${pos.position}`)
-                            .join('\n');
+                        .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
+                        .map(pos => `${pos.room} ${pos.position}`)
+                        .join('\n');
 
                         modal.querySelector('.modal-header').innerHTML = `
                             <div class="modal-title">Network-connected racks (${positions.length} positions)</div>
@@ -2067,78 +2071,78 @@
         });
     }
 
-    window.analyzeCurrentResults = analyzeCurrentResults;
-    window.closeAnalysis = closeAnalysis;
-    window.collectDetailedAnalysisData = collectDetailedAnalysisData;
-    window.createAnalysisDiv = createAnalysisDiv;
+window.analyzeCurrentResults = analyzeCurrentResults;
+window.closeAnalysis = closeAnalysis;
+window.collectDetailedAnalysisData = collectDetailedAnalysisData;
+window.createAnalysisDiv = createAnalysisDiv;
 
 
-    // 初始化函数
-    async function init() {
-        const maxRetries = 3;
-        let retryCount = 0;
-        window.clearAllFilters = clearAllFilters;
+// 初始化函数
+async function init() {
+    const maxRetries = 3;
+    let retryCount = 0;
+    window.clearAllFilters = clearAllFilters;
 
-        while (retryCount < maxRetries) {
-            try {
-                await loadExternalResources();
+    while (retryCount < maxRetries) {
+        try {
+            await loadExternalResources();
 
-                if (!window.jQuery || !window.jQuery.fn.select2) {
-                    throw new Error('Required dependencies not loaded');
-                }
+            if (!window.jQuery || !window.jQuery.fn.select2) {
+                throw new Error('Required dependencies not loaded');
+            }
 
-                const container = setupInterface();
-                document.getElementById('xwikicontent').appendChild(container);
+            const container = setupInterface();
+            document.getElementById('xwikicontent').appendChild(container);
 
-                setupAIEventListeners();
+            setupAIEventListeners();
 
-                const loadingIndicator = container.querySelector('.loading-indicator');
-                if (loadingIndicator) {
-                    loadingIndicator.style.display = 'none';
-                }
+            const loadingIndicator = container.querySelector('.loading-indicator');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
 
-                break;
-            } catch (error) {
-                retryCount++;
-                console.warn(`Initialization attempt ${retryCount} failed:`, error);
+            break;
+        } catch (error) {
+            retryCount++;
+            console.warn(`Initialization attempt ${retryCount} failed:`, error);
 
-                if (retryCount === maxRetries) {
-                    console.error('Failed to initialize after multiple attempts:', error);
-                    const errorDiv = document.createElement('div');
-                    errorDiv.className = 'error-message';
-                    errorDiv.textContent = `Failed to initialize after ${maxRetries} attempts: ${error.message}`;
-                    document.getElementById('xwikicontent').appendChild(errorDiv);
-                } else {
-                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                }
+            if (retryCount === maxRetries) {
+                console.error('Failed to initialize after multiple attempts:', error);
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error-message';
+                errorDiv.textContent = `Failed to initialize after ${maxRetries} attempts: ${error.message}`;
+                document.getElementById('xwikicontent').appendChild(errorDiv);
+            } else {
+                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
             }
         }
     }
+}
 
-    // ==================== AI功能 ====================
-    // 解析自然语言查询为筛选条件
-    async function parseNaturalLanguageQuery(userQuery) {
-        const availableOptions = {};
-        document.querySelectorAll('.filter-select').forEach(select => {
-            const column = $(select).data('column');
-            const label = $(select).closest('.filter-section').find('label').text().trim();
-            const options = [];
-            $(select).find('option').each(function() {
-                if (this.value) options.push(this.value);
-            });
-            if (options.length > 0) {
-                availableOptions[label] = { column: column, values: options };
-            }
+// ==================== AI功能 ====================
+// 解析自然语言查询为筛选条件
+async function parseNaturalLanguageQuery(userQuery) {
+    const availableOptions = {};
+    document.querySelectorAll('.filter-select').forEach(select => {
+        const column = $(select).data('column');
+        const label = $(select).closest('.filter-section').find('label').text().trim();
+        const options = [];
+        $(select).find('option').each(function() {
+            if (this.value) options.push(this.value);
         });
+        if (options.length > 0) {
+            availableOptions[label] = { column: column, values: options };
+        }
+    });
 
-        // 构建当前数据摘要（用于复杂查询）
-        const dataSummary = buildDataSummary();
+    // 构建当前数据摘要（用于复杂查询）
+    const dataSummary = buildDataSummary();
 
-        // 构建可用选项的描述文本
-        let optionsDescription = '当前站点可用的筛选选项及其值：';
-        Object.entries(availableOptions).forEach(([label, info]) => {
-            const displayValues = info.values.length > 30
-                ? info.values.slice(0, 30).join(', ') + ` ... (共${info.values.length}个)`
+    // 构建可用选项的描述文本
+    let optionsDescription = '当前站点可用的筛选选项及其值：';
+    Object.entries(availableOptions).forEach(([label, info]) => {
+        const displayValues = info.values.length > 30
+        ? info.values.slice(0, 30).join(', ') + ` ... (共${info.values.length}个)`
                 : info.values.join(', ');
             optionsDescription += `- ${label} (字段名: ${info.column}): [${displayValues}]
         `;
@@ -2228,7 +2232,7 @@
 
             // 方法1：尝试提取 markdown 代码块中的 JSON
             const jsonMatch = jsonText.match(/```json\s*([\s\S]*?)\s*```/) ||
-                             jsonText.match(/```\s*([\s\S]*?)\s*```/);
+                  jsonText.match(/```\s*([\s\S]*?)\s*```/);
             if (jsonMatch) {
                 jsonText = jsonMatch[1].trim();
             }
@@ -2252,28 +2256,28 @@
         }
     }
 
-    //执行 AI 查询
-    async function executeAIQuery() {
-        const queryInput = document.getElementById('aiQueryInput');
-        const resultDiv = document.getElementById('aiQueryResult');
-        const queryBtn = document.getElementById('aiQueryBtn');
+//执行 AI 查询
+async function executeAIQuery() {
+    const queryInput = document.getElementById('aiQueryInput');
+    const resultDiv = document.getElementById('aiQueryResult');
+    const queryBtn = document.getElementById('aiQueryBtn');
 
-        const userQuery = queryInput.value.trim();
-        if (!userQuery) {
-            alert('请输入查询内容');
-            return;
-        }
+    const userQuery = queryInput.value.trim();
+    if (!userQuery) {
+        alert('请输入查询内容');
+        return;
+    }
 
-        queryBtn.disabled = true;
-        queryBtn.innerHTML = '<span class="ai-icon">⏳</span> AI 分析中...';
-        resultDiv.style.display = 'block';
-        resultDiv.innerHTML = '<div class="ai-loading">🤖 Nova AI 正在理解您的查询...</div>';
+    queryBtn.disabled = true;
+    queryBtn.innerHTML = '<span class="ai-icon">⏳</span> AI 分析中...';
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div class="ai-loading">🤖 Nova AI 正在理解您的查询...</div>';
 
-        try {
-            const parseResult = await parseNaturalLanguageQuery(userQuery);
+    try {
+        const parseResult = await parseNaturalLanguageQuery(userQuery);
 
-            if (parseResult.error) {
-                resultDiv.innerHTML = `
+        if (parseResult.error) {
+            resultDiv.innerHTML = `
                     <div class="ai-error">
                         <strong>❌ ${parseResult.error}</strong>
                         <p>${parseResult.suggestion}</p>
@@ -2373,84 +2377,84 @@
         }
     }
 
-    // 收集当前统计数据
-    function collectCurrentStats() {
-        const totalPositions = Object.keys(window.filteredPositions || {}).length;
-        const rackTypes = {};
-        const powerStatus = {
-            'At Risk - Primary Loss': 0,
-            'At Risk - Secondary Loss': 0,
-            'At Risk - Partial Loss': 0,
-            'At Risk - Complete Loss': 0
-        };
+// 收集当前统计数据
+function collectCurrentStats() {
+    const totalPositions = Object.keys(window.filteredPositions || {}).length;
+    const rackTypes = {};
+    const powerStatus = {
+        'At Risk - Primary Loss': 0,
+        'At Risk - Secondary Loss': 0,
+        'At Risk - Partial Loss': 0,
+        'At Risk - Complete Loss': 0
+    };
 
-        Object.values(window.filteredPositions || {}).forEach(pos => {
-            const type = pos.type || 'Unknown';
-            rackTypes[type] = (rackTypes[type] || 0) + 1;
-        });
+    Object.values(window.filteredPositions || {}).forEach(pos => {
+        const type = pos.type || 'Unknown';
+        rackTypes[type] = (rackTypes[type] || 0) + 1;
+    });
 
-        return {
-            totalPositions,
-            rackTypes,
-            powerStatus
-        };
-    }
+    return {
+        totalPositions,
+        rackTypes,
+        powerStatus
+    };
+}
 
-    function buildDataSummary() {
-        // 按机柜聚合电路信息，用于统计
-        const positionData = {};
-        EXCEL_DATA.forEach(row => {
-            const key = `${row['Position Room']}-${row['Position']}`;
-            if (!positionData[key]) {
-                positionData[key] = { circuits: [] };
-                const posInfo = positionMap.get(key);
-                if (posInfo) {
-                    positionData[key].type = posInfo.type || 'unknown';
-                    positionData[key].status = posInfo.status || 'unknown';
-                    positionData[key].power_redundancy = posInfo.power_redundancy || 'unknown';
-                }
+function buildDataSummary() {
+    // 按机柜聚合电路信息，用于统计
+    const positionData = {};
+    EXCEL_DATA.forEach(row => {
+        const key = `${row['Position Room']}-${row['Position']}`;
+        if (!positionData[key]) {
+            positionData[key] = { circuits: [] };
+            const posInfo = positionMap.get(key);
+            if (posInfo) {
+                positionData[key].type = posInfo.type || 'unknown';
+                positionData[key].status = posInfo.status || 'unknown';
+                positionData[key].power_redundancy = posInfo.power_redundancy || 'unknown';
             }
-            positionData[key].circuits.push({
-                powerFeed: row['Power Feed'],
-                pdu: row['PDU Name'],
-                upsGroup: row['UPS Group'],
-                usb: row['USB'],
-                transformer: row.routingInfo?.transformer || 'N/A',
-                utility: row.routingInfo?.utility || 'N/A'
-            });
+        }
+        positionData[key].circuits.push({
+            powerFeed: row['Power Feed'],
+            pdu: row['PDU Name'],
+            upsGroup: row['UPS Group'],
+            usb: row['USB'],
+            transformer: row.routingInfo?.transformer || 'N/A',
+            utility: row.routingInfo?.utility || 'N/A'
         });
+    });
 
-        const allPositions = Object.entries(positionData);
+    const allPositions = Object.entries(positionData);
 
-        // 唯一值统计
-        const uniqueTransformers = [...new Set(EXCEL_DATA.map(r => r.routingInfo?.transformer).filter(Boolean))];
-        const uniqueUPS = [...new Set(EXCEL_DATA.map(r => r['UPS Group']).filter(Boolean))];
-        const uniquePDUs = [...new Set(EXCEL_DATA.map(r => r['PDU Name']).filter(Boolean))];
-        const uniqueUSBs = [...new Set(EXCEL_DATA.map(r => r['USB']).filter(Boolean))];
-        const uniqueUtilities = [...new Set(EXCEL_DATA.map(r => r.routingInfo?.utility).filter(Boolean))];
+    // 唯一值统计
+    const uniqueTransformers = [...new Set(EXCEL_DATA.map(r => r.routingInfo?.transformer).filter(Boolean))];
+    const uniqueUPS = [...new Set(EXCEL_DATA.map(r => r['UPS Group']).filter(Boolean))];
+    const uniquePDUs = [...new Set(EXCEL_DATA.map(r => r['PDU Name']).filter(Boolean))];
+    const uniqueUSBs = [...new Set(EXCEL_DATA.map(r => r['USB']).filter(Boolean))];
+    const uniqueUtilities = [...new Set(EXCEL_DATA.map(r => r.routingInfo?.utility).filter(Boolean))];
 
-        // 电路数量分布
-        const circuitCounts = {};
-        allPositions.forEach(([key, pos]) => {
-            const count = pos.circuits.length;
-            circuitCounts[count] = (circuitCounts[count] || 0) + 1;
-        });
+    // 电路数量分布
+    const circuitCounts = {};
+    allPositions.forEach(([key, pos]) => {
+        const count = pos.circuits.length;
+        circuitCounts[count] = (circuitCounts[count] || 0) + 1;
+    });
 
-        // 冗余类型分布
-        const redundancyDist = {};
-        allPositions.forEach(([key, pos]) => {
-            const r = pos.power_redundancy || 'unknown';
-            redundancyDist[r] = (redundancyDist[r] || 0) + 1;
-        });
+    // 冗余类型分布
+    const redundancyDist = {};
+    allPositions.forEach(([key, pos]) => {
+        const r = pos.power_redundancy || 'unknown';
+        redundancyDist[r] = (redundancyDist[r] || 0) + 1;
+    });
 
-        // 机柜类型分布
-        const typeDist = {};
-        allPositions.forEach(([key, pos]) => {
-            const t = pos.type || 'unknown';
-            typeDist[t] = (typeDist[t] || 0) + 1;
-        });
+    // 机柜类型分布
+    const typeDist = {};
+    allPositions.forEach(([key, pos]) => {
+        const t = pos.type || 'unknown';
+        typeDist[t] = (typeDist[t] || 0) + 1;
+    });
 
-        let summary = `当前站点数据概览：
+    let summary = `当前站点数据概览：
     - 机柜总数: ${allPositions.length}
     - 电路总数: ${EXCEL_DATA.length}
 
@@ -2511,110 +2515,110 @@
         return summary;
     }
 
-    function executeComplexFilter(filterLogic) {
-        const positionData = {};
+function executeComplexFilter(filterLogic) {
+    const positionData = {};
 
-        // 按机柜聚合电路信息
-        EXCEL_DATA.forEach(row => {
-            const key = `${row['Position Room']}-${row['Position']}`;
-            if (!positionData[key]) {
-                positionData[key] = { circuits: [] };
-            }
-            positionData[key].circuits.push({
-                pdu: row['PDU Name'],
-                upsGroup: row['UPS Group'],
-                usb: row['USB'],
-                powerFeed: row['Power Feed'],
-                transformer: row.routingInfo?.transformer || 'N/A',
-                utility: row.routingInfo?.utility || 'N/A'
-            });
+    // 按机柜聚合电路信息
+    EXCEL_DATA.forEach(row => {
+        const key = `${row['Position Room']}-${row['Position']}`;
+        if (!positionData[key]) {
+            positionData[key] = { circuits: [] };
+        }
+        positionData[key].circuits.push({
+            pdu: row['PDU Name'],
+            upsGroup: row['UPS Group'],
+            usb: row['USB'],
+            powerFeed: row['Power Feed'],
+            transformer: row.routingInfo?.transformer || 'N/A',
+            utility: row.routingInfo?.utility || 'N/A'
         });
+    });
 
-        const rule = filterLogic.rule;
-        const matchedPositions = [];
+    const rule = filterLogic.rule;
+    const matchedPositions = [];
 
-        Object.entries(positionData).forEach(([key, pos]) => {
-            let circuits = pos.circuits;
+    Object.entries(positionData).forEach(([key, pos]) => {
+        let circuits = pos.circuits;
 
-            // 根据 scope 筛选电路范围
-            if (rule.scope === 'primaryOnly') {
-                circuits = circuits.filter(c => c.powerFeed === 'Primary');
-            } else if (rule.scope === 'secondaryOnly') {
-                circuits = circuits.filter(c => c.powerFeed === 'Secondary');
-            }
-
-            if (circuits.length === 0) return;
-
-            let matched = false;
-
-            switch (rule.condition) {
-                case 'allSame': {
-                    const values = circuits.map(c => c[rule.field]).filter(v => v && v !== 'N/A');
-                    matched = values.length > 1 && new Set(values).size === 1;
-                    break;
-                }
-                case 'allDifferent': {
-                    const values = circuits.map(c => c[rule.field]).filter(v => v && v !== 'N/A');
-                    matched = values.length > 1 && new Set(values).size === values.length;
-                    break;
-                }
-                case 'primaryAndSecondarySame': {
-                    const primary = circuits.filter(c => c.powerFeed === 'Primary').map(c => c[rule.field]);
-                    const secondary = circuits.filter(c => c.powerFeed === 'Secondary').map(c => c[rule.field]);
-                    if (primary.length > 0 && secondary.length > 0) {
-                        const primarySet = new Set(primary);
-                        const secondarySet = new Set(secondary);
-                        // 检查主备电路是否有交集
-                        matched = [...primarySet].some(v => secondarySet.has(v));
-                    }
-                    break;
-                }
-                case 'contains': {
-                    matched = circuits.some(c => c[rule.field] === rule.value);
-                    break;
-                }
-                case 'count_equals': {
-                    matched = circuits.length === parseInt(rule.value);
-                    break;
-                }
-                case 'count_less_than': {
-                    matched = circuits.length < parseInt(rule.value);
-                    break;
-                }
-                default:
-                    console.warn('未知的筛选条件:', rule.condition);
-            }
-
-            if (matched) {
-                matchedPositions.push(key);
-            }
-        });
-
-        return matchedPositions;
-    }
-
-
-    /**
-     * 分析当前筛选结果
-     */
-    async function analyzeCurrentResults() {
-        const analysisDiv = document.getElementById('aiAnalysisResult') || createAnalysisDiv();
-        const analyzeBtn = document.querySelector('.ai-analyze-btn');
-
-        if (analyzeBtn) {
-            analyzeBtn.disabled = true;
-            analyzeBtn.innerHTML = '<span>⏳</span> 分析中...';
+        // 根据 scope 筛选电路范围
+        if (rule.scope === 'primaryOnly') {
+            circuits = circuits.filter(c => c.powerFeed === 'Primary');
+        } else if (rule.scope === 'secondaryOnly') {
+            circuits = circuits.filter(c => c.powerFeed === 'Secondary');
         }
 
-        analysisDiv.style.display = 'block';
-        analysisDiv.innerHTML = '<div class="ai-loading">🤖 Nova AI 正在分析筛选结果...</div>';
+        if (circuits.length === 0) return;
 
-        try {
-            // 1. 收集当前数据
-            const currentData = collectDetailedAnalysisData();
+        let matched = false;
 
-            // 2. 构建分析 prompt
-            const systemPrompt = `你是一个数据中心电力影响分析专家。你需要分析机柜的电力影响情况，判断是"潜在影响"还是"直接影响"，并提供下一步关注建议。
+        switch (rule.condition) {
+            case 'allSame': {
+                const values = circuits.map(c => c[rule.field]).filter(v => v && v !== 'N/A');
+                matched = values.length > 1 && new Set(values).size === 1;
+                break;
+            }
+            case 'allDifferent': {
+                const values = circuits.map(c => c[rule.field]).filter(v => v && v !== 'N/A');
+                matched = values.length > 1 && new Set(values).size === values.length;
+                break;
+            }
+            case 'primaryAndSecondarySame': {
+                const primary = circuits.filter(c => c.powerFeed === 'Primary').map(c => c[rule.field]);
+                const secondary = circuits.filter(c => c.powerFeed === 'Secondary').map(c => c[rule.field]);
+                if (primary.length > 0 && secondary.length > 0) {
+                    const primarySet = new Set(primary);
+                    const secondarySet = new Set(secondary);
+                    // 检查主备电路是否有交集
+                    matched = [...primarySet].some(v => secondarySet.has(v));
+                }
+                break;
+            }
+            case 'contains': {
+                matched = circuits.some(c => c[rule.field] === rule.value);
+                break;
+            }
+            case 'count_equals': {
+                matched = circuits.length === parseInt(rule.value);
+                break;
+            }
+            case 'count_less_than': {
+                matched = circuits.length < parseInt(rule.value);
+                break;
+            }
+            default:
+                console.warn('未知的筛选条件:', rule.condition);
+        }
+
+        if (matched) {
+            matchedPositions.push(key);
+        }
+    });
+
+    return matchedPositions;
+}
+
+
+/**
+     * 分析当前筛选结果
+     */
+async function analyzeCurrentResults() {
+    const analysisDiv = document.getElementById('aiAnalysisResult') || createAnalysisDiv();
+    const analyzeBtn = document.querySelector('.ai-analyze-btn');
+
+    if (analyzeBtn) {
+        analyzeBtn.disabled = true;
+        analyzeBtn.innerHTML = '<span>⏳</span> 分析中...';
+    }
+
+    analysisDiv.style.display = 'block';
+    analysisDiv.innerHTML = '<div class="ai-loading">🤖 Nova AI 正在分析筛选结果...</div>';
+
+    try {
+        // 1. 收集当前数据
+        const currentData = collectDetailedAnalysisData();
+
+        // 2. 构建分析 prompt
+        const systemPrompt = `你是一个数据中心电力影响分析专家。你需要分析机柜的电力影响情况，判断是"潜在影响"还是"直接影响"，并提供下一步关注建议。
 
     关键概念：
     - **直接影响**：当前筛选的电力组件故障会立即导致机柜断电
@@ -2699,182 +2703,182 @@
         }
     }
 
-    // 收集详细分析数据
-    function collectDetailedAnalysisData() {
-        const currentFilters = {};
+// 收集详细分析数据
+function collectDetailedAnalysisData() {
+    const currentFilters = {};
+    document.querySelectorAll('.filter-select').forEach(select => {
+        const column = $(select).data('column');
+        const values = $(select).val() || [];
+        if (values.length > 0) {
+            const label = $(select).closest('.filter-section').find('label').text().trim();
+            currentFilters[label] = values;
+        }
+    });
+
+    const rackTypes = {};
+    const redundancyTypes = {};
+    const riskStats = {
+        'At Risk - Complete Loss': 0,
+        'At Risk - Primary Loss': 0,
+        'At Risk - Secondary Loss': 0,
+        'At Risk - Partial Loss': 0
+    };
+
+    // 获取当前筛选后的数据
+    let positionsToAnalyze = window.filteredPositions || {};
+
+    // 如果 filteredPositions 为空但有活跃筛选条件，从 positionMap 重新构建
+    if (Object.keys(positionsToAnalyze).length === 0 && Object.keys(currentFilters).length > 0) {
+        const activeFilters = {};
         document.querySelectorAll('.filter-select').forEach(select => {
             const column = $(select).data('column');
             const values = $(select).val() || [];
             if (values.length > 0) {
-                const label = $(select).closest('.filter-section').find('label').text().trim();
-                currentFilters[label] = values;
+                activeFilters[column] = values.map(v => String(v).trim());
             }
         });
 
-        const rackTypes = {};
-        const redundancyTypes = {};
-        const riskStats = {
-            'At Risk - Complete Loss': 0,
-            'At Risk - Primary Loss': 0,
-            'At Risk - Secondary Loss': 0,
-            'At Risk - Partial Loss': 0
-        };
+        const filterLogic = window.filterLogic || 'and';
+        const activeFilterEntries = Object.entries(activeFilters).filter(([col, vals]) => vals && vals.length > 0);
 
-        // 获取当前筛选后的数据
-        let positionsToAnalyze = window.filteredPositions || {};
+        if (activeFilterEntries.length > 0) {
+            const filteredData = EXCEL_DATA.filter(item => {
+                const checkMatch = (column, values) => {
+                    if (!values || values.length === 0) return true;
+                    if (column === 'type' || column === 'status') {
+                        const positionKey = `${item['Position Room']}-${item['Position']}`;
+                        const posInfo = positionMap.get(positionKey);
+                        const value = column === 'type' ? posInfo?.type : posInfo?.status;
+                        return values.includes(value);
+                    } else if (column === 'power_kva') {
+                        const positionKey = `${item['Position Room']}-${item['Position']}`;
+                        const posInfo = positionMap.get(positionKey);
+                        return values.some(v => parseFloat(v) === posInfo?.power_kva);
+                    } else if (column.startsWith('routingInfo.')) {
+                        const routingValue = item.routingInfo?.[column.split('.')[1]];
+                        return values.some(v => String(routingValue || '').trim() === String(v).trim());
+                    } else {
+                        const itemValue = String(item[column] || '').trim();
+                        return values.some(v => String(v).trim() === itemValue);
+                    }
+                };
 
-        // 如果 filteredPositions 为空但有活跃筛选条件，从 positionMap 重新构建
-        if (Object.keys(positionsToAnalyze).length === 0 && Object.keys(currentFilters).length > 0) {
-            const activeFilters = {};
-            document.querySelectorAll('.filter-select').forEach(select => {
-                const column = $(select).data('column');
-                const values = $(select).val() || [];
-                if (values.length > 0) {
-                    activeFilters[column] = values.map(v => String(v).trim());
+                if (filterLogic === 'and') {
+                    return activeFilterEntries.every(([column, values]) => checkMatch(column, values));
+                } else {
+                    return activeFilterEntries.some(([column, values]) => checkMatch(column, values));
                 }
             });
 
-            const filterLogic = window.filterLogic || 'and';
-            const activeFilterEntries = Object.entries(activeFilters).filter(([col, vals]) => vals && vals.length > 0);
-
-            if (activeFilterEntries.length > 0) {
-                const filteredData = EXCEL_DATA.filter(item => {
-                    const checkMatch = (column, values) => {
-                        if (!values || values.length === 0) return true;
-                        if (column === 'type' || column === 'status') {
-                            const positionKey = `${item['Position Room']}-${item['Position']}`;
-                            const posInfo = positionMap.get(positionKey);
-                            const value = column === 'type' ? posInfo?.type : posInfo?.status;
-                            return values.includes(value);
-                        } else if (column === 'power_kva') {
-                            const positionKey = `${item['Position Room']}-${item['Position']}`;
-                            const posInfo = positionMap.get(positionKey);
-                            return values.some(v => parseFloat(v) === posInfo?.power_kva);
-                        } else if (column.startsWith('routingInfo.')) {
-                            const routingValue = item.routingInfo?.[column.split('.')[1]];
-                            return values.some(v => String(routingValue || '').trim() === String(v).trim());
-                        } else {
-                            const itemValue = String(item[column] || '').trim();
-                            return values.some(v => String(v).trim() === itemValue);
-                        }
-                    };
-
-                    if (filterLogic === 'and') {
-                        return activeFilterEntries.every(([column, values]) => checkMatch(column, values));
-                    } else {
-                        return activeFilterEntries.some(([column, values]) => checkMatch(column, values));
-                    }
-                });
-
-                // 从筛选后的数据构建 positionsToAnalyze
-                filteredData.forEach(item => {
-                    const key = `${item['Position Room']}-${item['Position']}`;
-                    if (!positionsToAnalyze[key]) {
-                        positionsToAnalyze[key] = item;
-                    }
-                });
-            }
-        }
-
-        // 遍历分析数据
-        Object.entries(positionsToAnalyze).forEach(([key, pos]) => {
-            const posInfo = positionMap.get(key);
-            if (!posInfo) return;
-
-            // 统计机柜类型
-            const type = posInfo.type || 'Unknown';
-            rackTypes[type] = (rackTypes[type] || 0) + 1;
-
-            // 统计冗余类型
-            const redundancy = posInfo.power_redundancy || 'Unknown';
-            redundancyTypes[redundancy] = (redundancyTypes[redundancy] || 0) + 1;
-        });
-
-        // 统计风险等级 - 从当前页面的统计数据中获取
-        const summaryTable = document.querySelector('.summary-title');
-        if (summaryTable) {
-            // 尝试从页面上的统计表格中读取风险数据
-            document.querySelectorAll('.stats-table td, .stats-cell').forEach(cell => {
-                const text = cell.textContent || '';
-                Object.keys(riskStats).forEach(riskLevel => {
-                    if (text.includes(riskLevel)) {
-                        const countCell = cell.nextElementSibling;
-                        if (countCell) {
-                            const count = parseInt(countCell.textContent) || 0;
-                            riskStats[riskLevel] = count;
-                        }
-                    }
-                });
+            // 从筛选后的数据构建 positionsToAnalyze
+            filteredData.forEach(item => {
+                const key = `${item['Position Room']}-${item['Position']}`;
+                if (!positionsToAnalyze[key]) {
+                    positionsToAnalyze[key] = item;
+                }
             });
         }
-
-        return {
-            filters: currentFilters,
-            totalRacks: Object.keys(positionsToAnalyze).length,
-            rackTypes,
-            redundancyTypes,
-            riskStats
-        };
     }
 
+    // 遍历分析数据
+    Object.entries(positionsToAnalyze).forEach(([key, pos]) => {
+        const posInfo = positionMap.get(key);
+        if (!posInfo) return;
+
+        // 统计机柜类型
+        const type = posInfo.type || 'Unknown';
+        rackTypes[type] = (rackTypes[type] || 0) + 1;
+
+        // 统计冗余类型
+        const redundancy = posInfo.power_redundancy || 'Unknown';
+        redundancyTypes[redundancy] = (redundancyTypes[redundancy] || 0) + 1;
+    });
+
+    // 统计风险等级 - 从当前页面的统计数据中获取
+    const summaryTable = document.querySelector('.summary-title');
+    if (summaryTable) {
+        // 尝试从页面上的统计表格中读取风险数据
+        document.querySelectorAll('.stats-table td, .stats-cell').forEach(cell => {
+            const text = cell.textContent || '';
+            Object.keys(riskStats).forEach(riskLevel => {
+                if (text.includes(riskLevel)) {
+                    const countCell = cell.nextElementSibling;
+                    if (countCell) {
+                        const count = parseInt(countCell.textContent) || 0;
+                        riskStats[riskLevel] = count;
+                    }
+                }
+            });
+        });
+    }
+
+    return {
+        filters: currentFilters,
+        totalRacks: Object.keys(positionsToAnalyze).length,
+        rackTypes,
+        redundancyTypes,
+        riskStats
+    };
+}
 
 
 
-    /**
+
+/**
      * 格式化分析结果
      */
-    function formatAnalysisResult(content) {
-        // 将 markdown 格式转换为 HTML
-        return content
-            .trim()
-            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-            .replace(/\n\n/g, '</p><p>')
-            .replace(/\n/g, '<br>')
-            .replace(/^(.+)$/s, '<p>$1</p>');
-    }
+function formatAnalysisResult(content) {
+    // 将 markdown 格式转换为 HTML
+    return content
+        .trim()
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>')
+        .replace(/^(.+)$/s, '<p>$1</p>');
+}
 
-    /**
+/**
      * 创建分析结果显示区域
      */
-    function createAnalysisDiv() {
-        const div = document.createElement('div');
-        div.id = 'aiAnalysisResult';
-        div.className = 'ai-analysis-container';
-        document.querySelector('.ai-query-section').appendChild(div);
-        return div;
+function createAnalysisDiv() {
+    const div = document.createElement('div');
+    div.id = 'aiAnalysisResult';
+    div.className = 'ai-analysis-container';
+    document.querySelector('.ai-query-section').appendChild(div);
+    return div;
+}
+
+function clearAllFilters() {
+    document.querySelectorAll('.filter-select').forEach(select => {
+        $(select).val(null).trigger('change');
+    });
+
+    const aiQueryResult = document.getElementById('aiQueryResult');
+    if (aiQueryResult) {
+        aiQueryResult.style.display = 'none';
     }
 
-    function clearAllFilters() {
-        document.querySelectorAll('.filter-select').forEach(select => {
-            $(select).val(null).trigger('change');
-        });
-
-        const aiQueryResult = document.getElementById('aiQueryResult');
-        if (aiQueryResult) {
-            aiQueryResult.style.display = 'none';
-        }
-
-        const aiAnalysisResult = document.getElementById('aiAnalysisResult');
-        if (aiAnalysisResult) {
-            aiAnalysisResult.style.display = 'none';
-        }
-
-        const aiQueryInput = document.getElementById('aiQueryInput');
-        if (aiQueryInput) {
-            aiQueryInput.value = '';
-        }
+    const aiAnalysisResult = document.getElementById('aiAnalysisResult');
+    if (aiAnalysisResult) {
+        aiAnalysisResult.style.display = 'none';
     }
 
-    function closeAnalysis() {
-        const analysisDiv = document.getElementById('aiAnalysisResult');
-        if (analysisDiv) {
-            analysisDiv.style.display = 'none';
-        }
+    const aiQueryInput = document.getElementById('aiQueryInput');
+    if (aiQueryInput) {
+        aiQueryInput.value = '';
     }
+}
+
+function closeAnalysis() {
+    const analysisDiv = document.getElementById('aiAnalysisResult');
+    if (analysisDiv) {
+        analysisDiv.style.display = 'none';
+    }
+}
 
 
-    // ==================== 样式定义 ====================
-    GM_addStyle(`
+// ==================== 样式定义 ====================
+GM_addStyle(`
         /* 站点选择区域 */
         .site-selection-section { padding: 20px; margin-bottom: 20px; background: #f8f9fa; border-radius: 6px; text-align: center; }
         .site-selection-section h2 { margin-bottom: 15px; color: #1976d2; }
@@ -3108,11 +3112,11 @@
 
     `);
 
-    // 页面加载初始化
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
+// 页面加载初始化
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
 
 })();
