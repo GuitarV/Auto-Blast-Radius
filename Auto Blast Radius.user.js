@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.73
+// @version      1.74
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -69,7 +69,7 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.73',
+        VERSION: '1.74',
         CLUSTER:'bjs',
 
         // API 端点配置
@@ -983,7 +983,7 @@
                     if (!item || typeof item !== 'object') return;
                     if (item.type === 'OH_MINIRACK' || item.type === 'NONRACK') return;
                     // 过滤非机房区域
-                    const excludedRooms = ['training', 'training_room', 'traininglab', 'parkinglot', 'office', 'cgfoffice', 'warehouse'];
+                    const excludedRooms = ['training', 'training_room', 'traininglab', 'parkinglot', 'office', 'cgfoffice', 'warehouse', '2-sto', '3f-ofc', '4f-scr', '4-sto','bbu'];
                     if (excludedRooms.some(r => item.room_name?.toLowerCase().includes(r))) return;
 
                     const networkInfo = networkDataMap.get(item.legacy_position_id) || { is_brick: false, hostname: null };
