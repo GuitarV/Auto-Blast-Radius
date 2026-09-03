@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.74
+// @version      1.75
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -69,7 +69,7 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.74',
+        VERSION: '1.75',
         CLUSTER:'bjs',
 
         // API 端点配置
@@ -1822,7 +1822,12 @@
 
                 // 提取数据行
                 const rows = Array.from(statsTable.querySelectorAll('tbody tr')).map(tr => {
-                    return Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim());
+                    return Array.from(tr.querySelectorAll('td'))
+                        .map(td => {
+                            const clone = td.cloneNode(true);
+                            clone.querySelectorAll('.risk-tooltip-img').forEach(el => el.remove());
+                            return clone.textContent.trim();
+                        });
                 });
 
                 // 生成 Markdown 表格
