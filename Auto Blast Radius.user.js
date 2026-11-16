@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.75
+// @version      1.76
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -69,7 +69,7 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.75',
+        VERSION: '1.76',
         CLUSTER:'bjs',
 
         // API 端点配置
@@ -1090,7 +1090,7 @@
         });
 
         // 初始化筛选逻辑为 AND
-        window.filterLogic = 'and';
+        window.filterLogic = 'or';
 
         // 逻辑切换按钮事件
         const logicBtns = document.querySelectorAll('.logic-btn');
@@ -1169,7 +1169,7 @@
             });
 
             // 获取当前筛选逻辑
-            const filterLogic = window.filterLogic || 'and';
+            const filterLogic = window.filterLogic || 'or';
 
             // 检查单个数据项是否匹配某个筛选条件
             const checkItemMatchesFilter = (item, column, values) => {
@@ -1200,6 +1200,7 @@
                 }
             };
 
+            const OR_FAULT_COLUMNS = ['PDU Name', 'UPS Group', 'USB', 'Power Feed', 'routingInfo.transformer', 'routingInfo.utility'];
             // 应用筛选器
             const activeFilterEntries = Object.entries(filters).filter(([col, vals]) => vals && vals.length > 0);
 
@@ -1212,11 +1213,14 @@
                         });
                     });
                 } else {
-                    // OR 逻辑：满足任一筛选条件即可
+                    // OR 逻辑：故障点条件（电力节点）之间取并集，范围条件（机房/类型/状态等）必须全部满足
+                    const faultEntries = activeFilterEntries.filter(([col]) => OR_FAULT_COLUMNS.includes(col));
+                    const scopeEntries = activeFilterEntries.filter(([col]) => !OR_FAULT_COLUMNS.includes(col));
                     filteredData = EXCEL_DATA.filter(item => {
-                        return activeFilterEntries.some(([column, values]) => {
-                            return checkItemMatchesFilter(item, column, values);
-                        });
+                        const scopeOk = scopeEntries.every(([column, values]) => checkItemMatchesFilter(item, column, values));
+                        if (!scopeOk) return false;
+                        if (faultEntries.length === 0) return true;
+                        return faultEntries.some(([column, values]) => checkItemMatchesFilter(item, column, values));
                     });
                 }
             }
@@ -1274,15 +1278,9 @@
                     const nonPowerFilters = activeFilterEntries.filter(([col]) => !powerRelatedFilters.includes(col));
 
                     if (nonPowerFilters.length > 0) {
-                        if (filterLogic === 'and') {
-                            shouldShow = nonPowerFilters.every(([column, values]) => {
-                                return checkPositionMatchesFilter(posInfo, column, values);
-                            });
-                        } else {
-                            shouldShow = nonPowerFilters.some(([column, values]) => {
-                                return checkPositionMatchesFilter(posInfo, column, values);
-                            });
-                        }
+                        shouldShow = nonPowerFilters.every(([column, values]) => {
+                            return checkPositionMatchesFilter(posInfo, column, values);
+                        });
                     }
 
                     if (shouldShow) {
@@ -1345,8 +1343,7 @@
                 }
             });
 
-            // ★ 修复：将 positionsToShow 中有但 filteredPositions 中缺失的位置同步进来
-            console.log('★ FIX EXECUTED, positionsToShow size:', positionsToShow.size);
+            // 修复：将 positionsToShow 中有但 filteredPositions 中缺失的位置同步进来
             positionsToShow.forEach(positionKey => {
                 if (!window.filteredPositions[positionKey] && positions[positionKey]) {
                     window.filteredPositions[positionKey] = {
@@ -1357,34 +1354,6 @@
                 }
             });
 
-            // ★ 修复代码之后加这些诊断
-            console.log('★ filteredPositions size:', Object.keys(window.filteredPositions).length);
-
-            // 统计 type 分布
-            const typeCount = {};
-            Object.entries(window.filteredPositions).forEach(([k, v]) => {
-                const key = `${v.type}|${v.status}`;
-                typeCount[key] = (typeCount[key] || 0) + 1;
-            });
-            console.log('★ type|status breakdown:', JSON.stringify(typeCount));
-
-            // 看 Stats 循环中 positionMap.get 的结果
-            let statsHitCount = 0;
-            let statsMissCount = 0;
-            const missedKeys = [];
-            Object.entries(window.filteredPositions).forEach(([positionKey, position]) => {
-                const posInfo = positionMap.get(positionKey);
-                if (posInfo?.status === 'deployed' && posInfo?.type?.toUpperCase() !== 'PATCH') {
-                    statsHitCount++;
-                } else {
-                    statsMissCount++;
-                    missedKeys.push({key: positionKey, posInfoExists: !!posInfo,
-                                     posInfoStatus: posInfo?.status, posInfoType: posInfo?.type,
-                                     positionType: position.type, positionStatus: position.status});
-                }
-            });
-            console.log('★ Stats loop: HIT (counted):', statsHitCount, 'MISS (skipped):', statsMissCount);
-            console.log('★ Missed positions:', JSON.stringify(missedKeys));
 
 
             filteredData.forEach(row => {
@@ -1403,6 +1372,39 @@
                     stats.patchRacks.positions.push({ room: posInfo.room_name, position: posInfo.name });
                 }
             });
+
+            // 统一的影响分类函数：统计表和弹窗列表都调用它，保证口径一致
+            function classifyPowerImpact(redundancy, expected, remP, remS) {
+                const hasDual = expected.primary > 0 && expected.secondary > 0;
+                if (redundancy === '2N' || redundancy === 'N+C') {
+                    if (!hasDual) {
+                        if (remP === 0 && expected.primary > 0) return 'Complete Power Loss';
+                        if (remP < expected.primary) return 'Lost Primary';
+                        return null;
+                    }
+                    if (remP === 0 && remS === 0) return 'Complete Power Loss';
+                    if (remP === 0 && remS > 0 && remS < expected.secondary) return 'S1 + Partial S2 Loss';
+                    if (remP === 0 && remS === expected.secondary) return 'Lost Primary';
+                    if (remS === 0 && remP > 0 && remP < expected.primary) return 'S2 + Partial S1 Loss';
+                    if (remS === 0 && remP === expected.primary) return 'Lost Secondary';
+                    if (remP > 0 && remS > 0 && remP < expected.primary && remS < expected.secondary) return 'Partial Power Loss';
+                    if (remP > 0 && remP < expected.primary && remS === expected.secondary) return 'Partial Primary Loss';
+                    if (remS > 0 && remS < expected.secondary && remP === expected.primary) return 'Partial Secondary Loss';
+                    return null;
+                }
+                if (!hasDual) {
+                    if (remP === 0 && remS === 0 && (expected.primary > 0 || expected.secondary > 0)) return 'Complete Power Loss';
+                    if ((remP > 0 && remP < expected.primary) || (remS > 0 && remS < expected.secondary)) return 'Partial Power Loss';
+                    return null;
+                }
+                if (remP === 0 && remS === 0) return 'Complete Power Loss';
+                if (remP === 0 && remS > 0) return 'Lost Primary';
+                if (remS === 0 && remP > 0) return 'Lost Secondary';
+                if (remP > 0 && remS > 0 && remP < expected.primary && remS < expected.secondary) return 'Partial Power Loss';
+                if (remP > 0 && remP < expected.primary && remS === expected.secondary) return 'Partial Primary Loss';
+                if (remS > 0 && remS < expected.secondary && remP === expected.primary) return 'Partial Secondary Loss';
+                return null;
+            }
 
             // 处理统计
             const processedPositions = new Set();
@@ -1432,68 +1434,10 @@
 
                     const remainingPrimary = position.powerChains.filter(chain => chain.powerFeed.toLowerCase() === 'primary' && !position.affectedPowerChains.some(affected => affected.circuit.name === chain.circuit.name)).length;
                     const remainingSecondary = position.powerChains.filter(chain => chain.powerFeed.toLowerCase() === 'secondary' && !position.affectedPowerChains.some(affected => affected.circuit.name === chain.circuit.name)).length;
-                    const hasDualPower = expected.primary > 0 && expected.secondary > 0;
-
-                    if (redundancy === '2N' || redundancy === 'N+C') {
-                        if (!hasDualPower) {
-                            if (remainingPrimary === 0 && expected.primary > 0) {
-                                stats.detailedStats[type]['Complete Power Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Complete Power Loss']++;
-                            } else if (remainingPrimary < expected.primary) {
-                                stats.detailedStats[type]['Lost Primary']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Lost Primary']++;
-                            }
-                        } else {
-                            if (remainingPrimary === 0 && remainingSecondary === 0) {
-                                stats.detailedStats[type]['Complete Power Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Complete Power Loss']++;
-                            } else if (remainingPrimary === 0 && remainingSecondary > 0 && remainingSecondary < expected.secondary) {
-                                stats.detailedStats[type]['S1 + Partial S2 Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['S1 + Partial S2 Loss']++;
-                            } else if (remainingPrimary === 0 && remainingSecondary === expected.secondary) {
-                                stats.detailedStats[type]['Lost Primary']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Lost Primary']++;
-                            } else if (remainingSecondary === 0 && remainingPrimary > 0 && remainingPrimary < expected.primary) {
-                                stats.detailedStats[type]['S2 + Partial S1 Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['S2 + Partial S1 Loss']++;
-                            } else if (remainingSecondary === 0 && remainingPrimary === expected.primary) {
-                                stats.detailedStats[type]['Lost Secondary']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Lost Secondary']++;
-                            } else if (remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) {
-                                stats.detailedStats[type]['Partial Power Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Partial Power Loss']++;
-                            } else if (remainingPrimary < expected.primary && remainingPrimary > 0 && remainingSecondary === expected.secondary) {
-                                stats.detailedStats[type]['Partial Primary Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Partial Primary Loss']++;
-                            } else if (remainingSecondary < expected.secondary && remainingSecondary > 0 && remainingPrimary === expected.primary) {
-                                stats.detailedStats[type]['Partial Secondary Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Partial Secondary Loss']++;
-                            }
-                        }
-                    } else {
-                        if (!hasDualPower) {
-                            if (remainingPrimary === 0 && expected.primary > 0) {
-                                stats.detailedStats[type]['Complete Power Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Complete Power Loss']++;
-                            } else if (remainingPrimary < expected.primary) {
-                                stats.detailedStats[type]['Partial Power Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Partial Power Loss']++;
-                            }
-                        } else {
-                            if (remainingPrimary === 0 && remainingSecondary === 0) {
-                                stats.detailedStats[type]['Complete Power Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Complete Power Loss']++;
-                            } else if (remainingPrimary === 0 && remainingSecondary > 0) {
-                                stats.detailedStats[type]['Lost Primary']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Lost Primary']++;
-                            } else if (remainingSecondary === 0 && remainingPrimary > 0) {
-                                stats.detailedStats[type]['Lost Secondary']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Lost Secondary']++;
-                            } else if (remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) {
-                                stats.detailedStats[type]['Partial Power Loss']++;
-                                if (isEuclid) stats.detailedStats[type].euclidCount['Partial Power Loss']++;
-                            }
-                        }
+                    const impact = classifyPowerImpact(redundancy, expected, remainingPrimary, remainingSecondary);
+                    if (impact) {
+                        stats.detailedStats[type][impact]++;
+                        if (isEuclid) stats.detailedStats[type].euclidCount[impact]++;
                     }
                 }
             });
@@ -1547,44 +1491,8 @@
 
                     const remainingPrimary = position.powerChains.filter(chain => chain.powerFeed.toLowerCase() === 'primary' && !position.affectedPowerChains.some(affected => affected.circuit.name === chain.circuit.name)).length;
                     const remainingSecondary = position.powerChains.filter(chain => chain.powerFeed.toLowerCase() === 'secondary' && !position.affectedPowerChains.some(affected => affected.circuit.name === chain.circuit.name)).length;
-                    const hasDualPower = expected.primary > 0 && expected.secondary > 0;
                     const redundancy = posInfo.power_redundancy;
-
-                    if (redundancy === '2N' || redundancy === 'N+C') {
-                        if (!hasDualPower) {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && expected.primary > 0) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Lost Primary' && remainingPrimary < expected.primary && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
-                        } else {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0)
-                                result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'S1 + Partial S2 Loss' && remainingPrimary === 0 && remainingSecondary > 0 && remainingSecondary < expected.secondary)
-                                result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0)
-                                result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'S2 + Partial S1 Loss' && remainingSecondary === 0 && remainingPrimary > 0 && remainingPrimary < expected.primary)
-                                result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0)
-                                result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0)
-                                result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Partial Primary Loss' && remainingPrimary < expected.primary && remainingPrimary > 0 && remainingSecondary === expected.secondary)
-                                result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Partial Secondary Loss' && remainingSecondary < expected.secondary && remainingSecondary > 0 && remainingPrimary === expected.primary)
-                                result.push(`${position.room} ${position.position}`);
-                        }
-                    } else {
-                        if (!hasDualPower) {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0 && (expected.primary > 0 || expected.secondary > 0)) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
-                        } else {
-                            if (metric === 'Complete Power Loss' && remainingPrimary === 0 && remainingSecondary === 0) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Lost Primary' && remainingPrimary === 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Lost Secondary' && remainingSecondary === 0 && remainingPrimary > 0) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Partial Power Loss' && remainingPrimary < expected.primary && remainingSecondary < expected.secondary && remainingPrimary > 0 && remainingSecondary > 0) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Partial Primary Loss' && remainingPrimary < expected.primary && remainingPrimary > 0 && remainingSecondary === expected.secondary) result.push(`${position.room} ${position.position}`);
-                            else if (metric === 'Partial Secondary Loss' && remainingSecondary < expected.secondary && remainingSecondary > 0 && remainingPrimary === expected.primary) result.push(`${position.room} ${position.position}`);
-                        }
-                    }
+                    if (classifyPowerImpact(redundancy, expected, remainingPrimary, remainingSecondary) === metric) result.push(`${position.room} ${position.position}`);
                 });
                 return result;
             }
@@ -1609,7 +1517,7 @@
             }
 
             // 生成统计表格HTML
-            const currentLogic = window.filterLogic || 'and';
+            const currentLogic = window.filterLogic || 'or';
             const statsHtml = `
             <div class="stats-container">
                 <div class="stats-header-row">
@@ -1618,6 +1526,11 @@
                         <div class="logic-toggle">
                             <button class="logic-btn-sm ${currentLogic === 'and' ? 'active' : ''}" data-logic="and">AND</button>
                             <button class="logic-btn-sm ${currentLogic === 'or' ? 'active' : ''}" data-logic="or">OR</button>
+                        </div>
+                        <div class="logic-tip">
+                            <p>PDU、UPS Group、USB、Power Feed、Transformer、Utility被判定为电力条件。</p>
+                            <p><b>AND（同时满足）</b>：统计<b><i>同时满足</i></b>所选电力条件的电路。选 USB=X 和 PDU=Y 时，只有既经过 X 又经过 Y 的电路才被计算，适合查询电力上下游设备信息。</p>
+                            <p><b>OR（任一满足）</b>：统计<b><i>任意满足</i></b>所选电力条件的电路。选 USB=X 和 PDU=Y 时，经过 X 的电路和经过 Y 的电路都被统计，适合响应设备故障场景。</p>
                         </div>
                     </div>
                 </div>
@@ -1706,7 +1619,7 @@
                       JSON.stringify({ hostname: positionInfo.hostname || 'Unknown', room: positionInfo.room_name, position: positionInfo.name, downstreamRacks: positionInfo.downstreamRacks }).replace(/'/g, '&#39;').replace(/"/g, '&quot;') : '';
 
                 return `
-                    <div class="topo-item ${isEuclid ? 'euclid-brick' : ''}">
+                    <div class="topo-item ${isEuclid ? 'euclid-brick' : ''}" data-pos-key="${escAttr(key)}">
                         <div class="topo-item-header">
                             <div class="position-info">
                                 <span class="status-indicator status-${positionInfo.status.toLowerCase() || 'unknown'}"></span>
@@ -1857,6 +1770,33 @@
 
     // ==================== Part 4b 开始 ====================
 
+    function escAttr(v) {
+        return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    // 从弹窗跳转到 Detail Info 中对应机柜
+    function jumpToDetailRack(posKey, sourceEl) {
+        const target = Array.from(document.querySelectorAll('.topo-item')).find(el => el.dataset.posKey === posKey);
+        if (!target) {
+            if (sourceEl && !sourceEl.querySelector('.jump-miss')) {
+                const tip = document.createElement('span');
+                tip.className = 'jump-miss';
+                tip.textContent = ' (not in Detail Info)';
+                sourceEl.appendChild(tip);
+                setTimeout(() => tip.remove(), 2500);
+            }
+            return false;
+        }
+        const content = target.querySelector('.topo-item-content');
+        if (content) content.classList.add('active');
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.remove('jump-highlight');
+        void target.offsetWidth;
+        target.classList.add('jump-highlight');
+        setTimeout(() => target.classList.remove('jump-highlight'), 2500);
+        return true;
+    }
+
     function setupModalEvents() {
         const modal = document.querySelector('.position-modal');
         const backdrop = document.querySelector('.modal-backdrop');
@@ -1906,7 +1846,7 @@
                         <tbody>${downstreamRacks.length > 0 ?
                 downstreamRacks
                 .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
-                .map(rack => `<tr><td>${rack.room} ${rack.position}</td><td>${rack.rack_type || 'N/A'}</td><td>${rack.fabric || 'N/A'}</td></tr>`)
+                .map(rack => `<tr class="jumpable" data-pos-key="${escAttr(rack.room + '-' + rack.position)}"><td>${rack.room} ${rack.position}</td><td>${rack.rack_type || 'N/A'}</td><td>${rack.fabric || 'N/A'}</td></tr>`)
                 .join('') :
             '<tr><td colspan="3" class="no-data">No downstream racks found</td></tr>'
         }</tbody>
@@ -1939,6 +1879,16 @@
                     });
                 }
                 return;
+            }
+
+            // 点击机柜名跳转到 Detail Info（Euclid 标签优先；多次绑定时只处理一次）
+            if (!e.target.closest('.euclid-indicator') && !e._jumpHandled) {
+                const jumpEl = e.target.closest('[data-pos-key]');
+                if (jumpEl) {
+                    e._jumpHandled = true;
+                    if (jumpToDetailRack(jumpEl.dataset.posKey, jumpEl.querySelector('.position-name') || jumpEl)) closeModal();
+                    return;
+                }
             }
 
             const euclidTag = e.target.closest('.euclid-indicator.clickable');
@@ -1995,7 +1945,7 @@
                             }
 
                             return `
-                                    <div class="position-item ${isEuclid ? 'euclid-position' : ''}">
+                                    <div class="position-item jumpable ${isEuclid ? 'euclid-position' : ''}" data-pos-key="${escAttr(positionKey)}">
                                         <span class="position-name">${position}</span>
                                         ${isEuclid ? `<span class="euclid-indicator clickable" ${euclidDataAttr} title="Click to view downstream racks">Euclid (${posInfo.downstreamRacks?.length || 0})</span>` : ''}
                                     </div>`;
@@ -2022,7 +1972,7 @@
 
                         modal.querySelector('.position-list').innerHTML = positions
                             .sort((a, b) => `${a.room} ${a.position}`.localeCompare(`${b.room} ${b.position}`, undefined, {numeric: true}))
-                            .map(position => `<div class="position-item"><span class="position-name">${position.room} ${position.position}</span></div>`)
+                            .map(position => `<div class="position-item jumpable" data-pos-key="${escAttr(position.room + '-' + position.position)}"><span class="position-name">${position.room} ${position.position}</span></div>`)
                             .join('');
 
                         modal.style.display = 'block';
@@ -2047,7 +1997,7 @@
                         modal.querySelector('.position-list').innerHTML = positions
                             .sort((a, b) => String(a.position).localeCompare(String(b.position), undefined, {numeric: true}))
                             .map(position => `
-                                <div class="position-item">
+                                <div class="position-item jumpable" data-pos-key="${escAttr(position.room + '-' + position.position)}">
                                     <span class="position-name">${position.room} ${position.position}</span>
                                     ${position.rack_type ? `<span class="rack-type-tag">${position.rack_type}</span>` : ''}
                                 </div>`)
@@ -2743,7 +2693,7 @@ function collectDetailedAnalysisData() {
             }
         });
 
-        const filterLogic = window.filterLogic || 'and';
+        const filterLogic = window.filterLogic || 'or';
         const activeFilterEntries = Object.entries(activeFilters).filter(([col, vals]) => vals && vals.length > 0);
 
         if (activeFilterEntries.length > 0) {
@@ -3062,10 +3012,20 @@ GM_addStyle(`
         .filter-logic-inline { display: flex; align-items: center; gap: 8px; }
         .logic-label { font-size: 12px; font-weight: 600; color: #1976d2; }
         .logic-toggle { display: flex; border-radius: 4px; overflow: hidden; border: 1px solid #1976d2; background: white; }
-        .logic-btn-sm { padding: 4px 12px; border: none; background: white; color: #1976d2; font-weight: 600; font-size: 11px; cursor: pointer; transition: all 0.2s ease; line-height: 1.2; }
+        .logic-btn-sm { padding: 4px 14px; border: none; background: #eceff1; color: #90a4ae; font-weight: 500; font-size: 11px; cursor: pointer; transition: all 0.2s ease; line-height: 1.2; }
         .logic-btn-sm:first-child { border-right: 1px solid #1976d2; }
-        .logic-btn-sm:hover { background: #e3f2fd; }
-        .logic-btn-sm.active { background: #1976d2; color: white; }
+        .logic-btn-sm:not(.active):hover { background: #cfd8dc; color: #546e7a; }
+        .position-item.jumpable, .euclid-downstream-table tr.jumpable { cursor: pointer; }
+        .position-item.jumpable:hover { background: #e3f2fd; }
+        .euclid-downstream-table tr.jumpable:hover td { background: #e3f2fd; }
+        .jump-miss { color: #e65100; font-size: 11px; margin-left: 6px; }
+        .topo-item.jump-highlight { outline: 3px solid #ffb300; outline-offset: 2px; transition: outline-color 0.5s ease; }
+        .filter-logic-inline { position: relative; }
+        .logic-tip { display: none; position: absolute; right: 0; top: 100%; margin-top: 6px; z-index: 9999; width: 380px; background: white; border: 2px solid #90caf9; border-radius: 8px; padding: 8px 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-size: 12px; color: #333; line-height: 1.6; text-align: left; }
+        .logic-tip p { margin: 4px 0; }
+        .filter-logic-inline:hover .logic-tip { display: block; }
+        .logic-btn-sm.active { background: #1565c0; color: white; font-weight: 700; box-shadow: inset 0 -2px 0 #ffb300; cursor: default; }
+        .logic-btn-sm.active::before { content: '✓ '; }
 
         /* AI 查询区域 */
         .ai-query-section { margin: 15px 0; background: #f8f9fa; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
