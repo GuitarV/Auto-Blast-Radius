@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Blast Radius
 // @namespace    http://tampermonkey.net/
-// @version      1.76
+// @version      1.77
 // @author       xiongwev
 // @description  Display datacenter rack topology
 // @match        https://w.amazon.com/bin/view/G_China_Infra_Ops/BJSPEK/DCEO/Auto_Blast_Radius*
@@ -69,7 +69,7 @@
 
     const CONFIG = {
         // 版本信息
-        VERSION: '1.76',
+        VERSION: '1.77',
         CLUSTER:'bjs',
 
         // API 端点配置
@@ -1604,7 +1604,7 @@
             </div>`;
 
             const filteredPositionsCount = Object.entries(positions).filter(([key]) => positionsToShow.has(key)).length;
-            const positionsCountHtml = `<div class="positions-count-container"><div class="positions-count"><span class="count-label">Total Positions:</span><span class="count-value">${filteredPositionsCount}</span></div></div>`;
+            const positionsCountHtml = `<div class="positions-count-container"><div class="positions-count"><span class="count-label">Total Positions:</span><span class="count-value">${filteredPositionsCount}</span><button id="exportDetailBtn" class="copy-positions-button" style="margin-left:auto;">Export CSV</button></div></div>`;
 
             // 生成位置HTML
             const positionsHtml = Object.entries(positions)
@@ -1657,6 +1657,50 @@
                     </div>`;
                 }).join('');
 
+            // 构建 Detail Info 导出数据（与页面显示的机柜、顺序一致，每条电路一行）
+            window.detailExportRows = [];
+            window.detailExportMeta = {
+                site: SELECTED_SITE,
+                logic: (window.filterLogic || 'or').toUpperCase(),
+                filters: Object.entries(filters || {})
+                    .filter(([, vals]) => vals && vals.length > 0)
+                    .map(([col, vals]) => [(CONFIG.FILTER_OPTIONS.find(f => f.column === col) || {}).label || col, vals.join(', ')])
+            };
+            Object.entries(positions)
+                .filter(([key]) => positionsToShow.has(key))
+                .sort(([keyA], [keyB]) => String(keyA).localeCompare(String(keyB), undefined, {numeric: true}))
+                .forEach(([key, position]) => {
+                    const posInfo = positionMap.get(key);
+                    if (!posInfo) return;
+                    const fp = window.filteredPositions[key] || position;
+                    const affectedNames = new Set((fp.affectedPowerChains || []).map(c => c.circuit.name));
+                    const hasChainData = position.powerChains.some(c => c.circuit.name !== 'N/A');
+
+                    let impact = '';
+                    const expected = expectedPowerByPosition[key];
+                    if (hasChainData && expected && posInfo.status === 'deployed' && (posInfo.type || '').toUpperCase() !== 'PATCH') {
+                        const remP = position.powerChains.filter(c => c.powerFeed.toLowerCase() === 'primary' && !affectedNames.has(c.circuit.name)).length;
+                        const remS = position.powerChains.filter(c => c.powerFeed.toLowerCase() === 'secondary' && !affectedNames.has(c.circuit.name)).length;
+                        const m = classifyPowerImpact(posInfo.power_redundancy, expected, remP, remS);
+                        impact = m ? (CONFIG.DISPLAY_NAMES[m] || m) : '';
+                    }
+
+                    position.powerChains.forEach(chain => {
+                        const noData = chain.circuit.name === 'N/A';
+                        window.detailExportRows.push([
+                            posInfo.room_name, posInfo.name, posInfo.status || '', (posInfo.type || '').toUpperCase(),
+                            posInfo.power_redundancy || '', Number.isFinite(posInfo.power_kva) ? posInfo.power_kva : '',
+                            posInfo.is_brick ? 'Yes' : 'No', posInfo.is_brick ? (posInfo.downstreamRacks?.length || 0) : '',
+                            noData ? '' : chain.circuit.name, noData ? '' : chain.circuit.number,
+                            noData ? '' : chain.pdu.name, noData ? '' : chain.pdu.type,
+                            noData ? '' : chain.upsGroup, noData ? '' : chain.usb, noData ? '' : chain.powerFeed,
+                            noData ? '' : (chain.routingInfo?.transformer || ''), noData ? '' : (chain.routingInfo?.utility || ''),
+                            noData ? '' : (affectedNames.has(chain.circuit.name) ? 'Yes' : 'No'),
+                            impact
+                        ]);
+                    });
+                });
+
             // 渲染内容
             let contentContainer = topoView.querySelector('.content-container');
             if (!contentContainer) {
@@ -1687,6 +1731,7 @@
 
             setupModalEvents();
             setupExportButton();
+            setupDetailExportButton();
             setupLogicToggle();
 
         } catch (error) {
@@ -1719,6 +1764,58 @@
                 // 重新更新显示
                 updateDisplay(activeFilters);
             });
+        });
+    }
+
+    function setupDetailExportButton() {
+        const btn = document.getElementById('exportDetailBtn');
+        if (!btn) return;
+        btn.addEventListener('click', () => {
+            const rows = window.detailExportRows || [];
+            if (rows.length === 0) {
+                alert('No Detail Info to export');
+                return;
+            }
+            const headers = ['Room', 'Position', 'Status', 'Rack Type', 'Redundancy', 'Power (kVA)', 'Euclid', 'Downstream Racks',
+                             'Circuit Name', 'Circuit Number', 'PDU Name', 'PDU Type', 'UPS Group', 'USB', 'Power Feed',
+                             'Transformer', 'Utility', 'Affected Circuit', 'Rack Impact'];
+            // Excel 会把 "2-1"、"1-2-3" 之类的文本自动转成日期/数字，这类单元格用 ="..." 强制按文本显示
+            const esc = (v, forceText = true) => {
+                let t = String(v === null || v === undefined ? '' : v);
+                if (forceText && /^[0-9][0-9\-\/.:eE ]*$/.test(t)) t = '="' + t + '"';
+                return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+            };
+            const numericCols = new Set([5, 7]); // Power (kVA)、Downstream Racks 保持数字
+            const meta = window.detailExportMeta || { site: SELECTED_SITE, logic: '', filters: [] };
+            const nowD = new Date();
+            const p2 = n => String(n).padStart(2, '0');
+            const metaRows = [
+                ['Site', meta.site],
+                ['Exported At', `${nowD.getFullYear()}-${p2(nowD.getMonth() + 1)}-${p2(nowD.getDate())} ${p2(nowD.getHours())}:${p2(nowD.getMinutes())}`],
+                ['Filter Logic', meta.logic],
+                ...(meta.filters.length > 0 ? meta.filters.map(([label, vals]) => [`Filter: ${label}`, vals]) : [['Filters', 'None']])
+            ];
+            const lines = [
+                ...metaRows.map(r => r.map(c => esc(c)).join(',')),
+                '',
+                headers.map(h => esc(h, false)).join(','),
+                ...rows.map(r => r.map((c, i) => esc(c, !numericCols.has(i))).join(','))
+            ];
+            const csv = '\uFEFF' + lines.join('\r\n');
+            const d = new Date();
+            const pad = n => String(n).padStart(2, '0');
+            const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+            const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${SELECTED_SITE || 'Site'}_DetailInfo_${stamp}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            const old = btn.innerHTML;
+            btn.innerHTML = `Exported ${new Set(rows.map(r => r[0] + '-' + r[1])).size} racks`;
+            setTimeout(() => { btn.innerHTML = old; }, 3000);
         });
     }
 
@@ -2905,7 +3002,7 @@ GM_addStyle(`
 
         /* 位置计数 */
         .positions-count-container { margin: 15px 0; }
-        .positions-count { display: flex; align-items: center; gap: 10px; }
+        .positions-count { display: flex; align-items: center; gap: 10px; width: 100%; }
         .count-label { font-weight: bold; color: #1976d2; }
         .count-value { font-size: 1em; font-weight: bold; color: #333; padding: 2px 10px; }
 
